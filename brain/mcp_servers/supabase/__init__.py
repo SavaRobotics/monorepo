@@ -1,0 +1,1 @@
+"""Supabase operations MCP server."""

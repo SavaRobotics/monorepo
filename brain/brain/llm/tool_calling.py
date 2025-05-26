@@ -89,16 +89,46 @@ class BrainOrchestrator:
                 except Exception as e:
                     tool_results.append(f"Tool {tool_call.name} failed: {str(e)}")
             
-            # Add assistant message and tool results to conversation
-            self.conversation_history.append(Message(role="assistant", content=response.content))
+            # Add assistant message with content if any
+            if response.content:
+                self.conversation_history.append(Message(role="assistant", content=response.content))
             
             # Get final response with tool results
             tool_context = "\n".join(tool_results)
-            final_message = f"Based on the tool results:\n{tool_context}\n\nPlease provide a final response to the user."
+            final_message = f"Based on the tool results:\n{tool_context}\n\nPlease provide a final response to the user. You still have access to the same tools if needed."
             self.conversation_history.append(Message(role="user", content=final_message))
             
-            final_response = await self.llm_client.chat(messages=self.conversation_history)
-            response_content = final_response.content
+            # Allow for another round of tool calls
+            final_response = await self.llm_client.chat(
+                messages=self.conversation_history,
+                tools=tools if tools else None
+            )
+            
+            # If there are more tool calls, handle them
+            if final_response.tool_calls:
+                # Handle the additional tool calls
+                more_results = []
+                for tool_call in final_response.tool_calls:
+                    try:
+                        result = await self.tool_registry.execute_tool(tool_call)
+                        more_results.append(f"Tool {tool_call.name} result: {result}")
+                    except Exception as e:
+                        more_results.append(f"Tool {tool_call.name} failed: {str(e)}")
+                
+                # Combine all results
+                all_results = tool_results + more_results
+                combined_context = "\n".join(all_results)
+                
+                # Get final response after all tools
+                self.conversation_history.append(Message(
+                    role="user", 
+                    content=f"All tool executions complete. Results:\n{combined_context}\n\nProvide a final summary."
+                ))
+                
+                summary_response = await self.llm_client.chat(messages=self.conversation_history)
+                response_content = summary_response.content
+            else:
+                response_content = final_response.content
         else:
             response_content = response.content
         

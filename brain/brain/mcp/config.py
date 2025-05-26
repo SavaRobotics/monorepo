@@ -20,6 +20,10 @@ class MCPServerConfig:
         "database": {
             "command": ["python", "-m", "mcp_servers.database.server"],
             "description": "Database operations with SQLite"
+        },
+        "supabase": {
+            "command": ["python", "-m", "mcp_servers.supabase.server"],
+            "description": "Supabase database operations"
         }
     }
     

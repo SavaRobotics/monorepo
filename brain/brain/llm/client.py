@@ -68,16 +68,24 @@ class AnthropicClient(LLMClient):
         self.model = model
 
     async def chat(self, messages: List[Message], tools: Optional[List[Dict]] = None) -> LLMResponse:
-        # Convert messages format for Anthropic
+        # Extract system message if present
+        system_content = None
         anthropic_messages = []
+        
         for msg in messages:
-            anthropic_messages.append({"role": msg.role, "content": msg.content})
+            if msg.role == "system":
+                system_content = msg.content
+            else:
+                anthropic_messages.append({"role": msg.role, "content": msg.content})
 
         kwargs = {
             "model": self.model,
             "messages": anthropic_messages,
             "max_tokens": 4096,
         }
+        
+        if system_content:
+            kwargs["system"] = system_content
         
         if tools:
             kwargs["tools"] = tools

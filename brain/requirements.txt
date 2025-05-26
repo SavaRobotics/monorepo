@@ -11,3 +11,4 @@ structlog>=23.2.0
 rich>=13.7.0
 typer>=0.9.0
 requests>=2.31.0
+supabase>=2.0.0
