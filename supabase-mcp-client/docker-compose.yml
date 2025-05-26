@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  mcp-client:
+    build: .
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - SUPABASE_PAT=${SUPABASE_PAT}
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/app
