@@ -95,7 +95,7 @@ def unfold_step_file():
                 
                 # Use FreeCAD in headless mode
                 cmd = [
-                    'freecad-cmd', 
+                    'freecad', 
                     step_path, 
                     '-c', script_path
                 ]
@@ -206,7 +206,7 @@ def webhook_step_file():
                         logger.info(f"First line of script: {first_line}")
                 
                 # Use FreeCAD in headless mode
-                cmd = ['freecad-cmd', step_path, '-c', script_path]
+                cmd = ['freecad', step_path, '-c', script_path]
                 logger.info(f"Running FreeCAD: {' '.join(cmd)}")
                 
                 # Run FreeCAD conversion
