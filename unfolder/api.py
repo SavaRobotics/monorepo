@@ -82,6 +82,7 @@ def unfold_step_file():
             # Set environment variables
             env = os.environ.copy()
             env['K_FACTOR'] = str(kfactor)
+            env['OUTPUT_DIR'] = output_dir
             env['DISPLAY'] = ':99'
             
             # Start virtual display (FreeCAD needs this)
@@ -185,9 +186,16 @@ def webhook_step_file():
                 # Convert using direct FreeCAD approach (same as unfold endpoint)
                 logger.info(f"Starting conversion: {step_path}")
                 
+                # Create output directory
+                input_dir = os.path.join(temp_dir, 'input')
+                output_dir = os.path.join(temp_dir, 'output')
+                os.makedirs(input_dir, exist_ok=True)
+                os.makedirs(output_dir, exist_ok=True)
+                
                 # Set environment variables
                 env = os.environ.copy()
                 env['K_FACTOR'] = os.environ.get('K_FACTOR', '0.38')
+                env['OUTPUT_DIR'] = output_dir
                 env['DISPLAY'] = ':99'
                 
                 # Start virtual display (FreeCAD needs this)
@@ -195,10 +203,6 @@ def webhook_step_file():
                                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
                 try:
-                    input_dir = os.path.join(temp_dir, 'input')
-                    output_dir = os.path.join(temp_dir, 'output')
-                    os.makedirs(input_dir, exist_ok=True)
-                    os.makedirs(output_dir, exist_ok=True)
                     
                     # Use the working FreeCAD approach
                     cmd = [

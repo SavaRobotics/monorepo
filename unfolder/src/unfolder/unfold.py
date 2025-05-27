@@ -70,7 +70,14 @@ part = doc.addObject("Part::Feature", "LargestFace")
 part.Shape = largest_face
 doc.recompute()
 
-importDXF.export([part], "/app/output/largest_face_raw.dxf")
+output_dir = os.environ.get("OUTPUT_DIR", "/app/output")
+os.makedirs(output_dir, exist_ok=True)
+
+raw_dxf_path = os.path.join(output_dir, "largest_face_raw.dxf")
+final_dxf_path = os.path.join(output_dir, "largest_face.dxf")
+step_path = os.path.join(output_dir, "unbend_model.step")
+
+importDXF.export([part], raw_dxf_path)
 
 # Reorient the DXF to ensure it's on the XY plane
 import sys
@@ -78,9 +85,9 @@ sys.path.append("/app/src/unfolder")
 from orientdxf import transform_entities
 
 print("Reorienting DXF to XY plane...")
-transform_entities("/app/output/largest_face_raw.dxf", "/app/output/largest_face.dxf")
+transform_entities(raw_dxf_path, final_dxf_path)
 print("DXF reorientation complete.")
 
-Part.export([unfold_obj], "/app/output/unbend_model.step")
+Part.export([unfold_obj], step_path)
 
 exit(0)
