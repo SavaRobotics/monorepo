@@ -92,7 +92,9 @@ def unfold_step_file():
             
             # Convert STEP to DXF
             try:
+                logger.info(f"Starting conversion: {step_path} -> {dxf_path}")
                 success = convert_step_to_dxf(step_path, dxf_path)
+                logger.info(f"Conversion result: {success}")
                 
                 if success and os.path.exists(dxf_path):
                     logger.info(f"Successfully converted {filename} to DXF")
