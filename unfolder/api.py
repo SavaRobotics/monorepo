@@ -227,7 +227,9 @@ def webhook_step_file():
                     if result.stdout:
                         logger.info(f"FreeCAD stdout: {result.stdout}")
                     if result.stderr:
-                        logger.info(f"FreeCAD stderr: {result.stderr}")
+                        logger.error(f"FreeCAD stderr: {result.stderr}")
+                    else:
+                        logger.info("FreeCAD stderr: (empty)")
                     
                     # Check for output DXF file
                     dxf_path = os.path.join(output_dir, 'largest_face.dxf')

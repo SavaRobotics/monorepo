@@ -1,11 +1,28 @@
-import importDXF
-import Part
-import Draft
+print("=== UNFOLD SCRIPT STARTING ===")
 import os
 import sys
+print("Basic imports successful")
 
-k_factor = float(os.environ["K_FACTOR"] if len(sys.argv) > 1 else "0.38")
+k_factor = float(os.environ.get("K_FACTOR", "0.38"))
 print(f"Using K-factor: {k_factor}")
+
+try:
+    import importDXF
+    print("importDXF imported successfully")
+except Exception as e:
+    print(f"Failed to import importDXF: {e}")
+    
+try:
+    import Part
+    print("Part imported successfully")
+except Exception as e:
+    print(f"Failed to import Part: {e}")
+    
+try:
+    import Draft
+    print("Draft imported successfully")
+except Exception as e:
+    print(f"Failed to import Draft: {e}")
 
 def patch_freecad_precision():
     # Check if Precision attribute exists
