@@ -90,11 +90,19 @@ def unfold_step_file():
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             
             try:
+                # Check if script exists
+                script_path = '/app/src/unfolder/unfold.py'
+                logger.info(f"Script exists at {script_path}: {os.path.exists(script_path)}")
+                if os.path.exists(script_path):
+                    with open(script_path, 'r') as f:
+                        first_line = f.readline().strip()
+                        logger.info(f"First line of script: {first_line}")
+                
                 # Use the working FreeCAD approach
                 cmd = [
                     'freecad', 
                     step_path, 
-                    '-c', '/app/src/unfolder/unfold.py'
+                    '-c', script_path
                 ]
                 
                 logger.info(f"Running FreeCAD: {' '.join(cmd)}")
@@ -204,11 +212,19 @@ def webhook_step_file():
                 
                 try:
                     
+                    # Check if script exists
+                    script_path = '/app/src/unfolder/unfold.py'
+                    logger.info(f"Script exists at {script_path}: {os.path.exists(script_path)}")
+                    if os.path.exists(script_path):
+                        with open(script_path, 'r') as f:
+                            first_line = f.readline().strip()
+                            logger.info(f"First line of script: {first_line}")
+                    
                     # Use the working FreeCAD approach
                     cmd = [
                         'freecad', 
                         step_path, 
-                        '-c', '/app/src/unfolder/unfold.py'
+                        '-c', script_path
                     ]
                     
                     logger.info(f"Running FreeCAD: {' '.join(cmd)}")
