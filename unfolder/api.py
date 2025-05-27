@@ -88,6 +88,9 @@ def unfold_step_file():
             # Start virtual display (FreeCAD needs this)
             xvfb_proc = subprocess.Popen(['Xvfb', ':99', '-screen', '0', '1024x768x24'], 
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Wait a moment for Xvfb to start
+            import time
+            time.sleep(2)
             
             try:
                 # Check if script exists
@@ -209,6 +212,9 @@ def webhook_step_file():
                 # Start virtual display (FreeCAD needs this)
                 xvfb_proc = subprocess.Popen(['Xvfb', ':99', '-screen', '0', '1024x768x24'], 
                                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # Wait a moment for Xvfb to start
+                import time
+                time.sleep(2)
                 
                 try:
                     
