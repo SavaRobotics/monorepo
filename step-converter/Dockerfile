@@ -10,7 +10,7 @@ COPY package*.json ./
 RUN npm ci --only=production
 
 # Copy application code
-COPY server.js ./
+COPY server-porter.js ./server.js
 
 # Create directories
 RUN mkdir -p temp_uploads output
