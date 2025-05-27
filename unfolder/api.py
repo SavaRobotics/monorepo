@@ -182,81 +182,117 @@ def webhook_step_file():
                 
                 logger.info(f"Downloaded STEP file: {step_filename}")
                 
-                # Convert using the working unfold endpoint
-                with open(step_path, 'rb') as f:
-                    files = {'stepfile': (step_filename, f, 'application/step')}
-                    data_form = {'kfactor': os.environ.get('K_FACTOR', '0.38')}
+                # Convert using direct FreeCAD approach (same as unfold endpoint)
+                logger.info(f"Starting conversion: {step_path}")
+                
+                # Set environment variables
+                env = os.environ.copy()
+                env['K_FACTOR'] = os.environ.get('K_FACTOR', '0.38')
+                env['DISPLAY'] = ':99'
+                
+                # Start virtual display (FreeCAD needs this)
+                xvfb_proc = subprocess.Popen(['Xvfb', ':99', '-screen', '0', '1024x768x24'], 
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+                try:
+                    input_dir = os.path.join(temp_dir, 'input')
+                    output_dir = os.path.join(temp_dir, 'output')
+                    os.makedirs(input_dir, exist_ok=True)
+                    os.makedirs(output_dir, exist_ok=True)
                     
-                    # Call our own unfold endpoint
-                    unfold_response = requests.post(
-                        'http://localhost:8080/unfold',
-                        files=files,
-                        data=data_form,
+                    # Use the working FreeCAD approach
+                    cmd = [
+                        'freecad', 
+                        step_path, 
+                        '-c', '/app/src/unfolder/unfold.py'
+                    ]
+                    
+                    logger.info(f"Running FreeCAD: {' '.join(cmd)}")
+                    
+                    # Run FreeCAD with mounted input/output
+                    result = subprocess.run(
+                        cmd,
+                        env=env,
+                        cwd=temp_dir,
+                        capture_output=True,
+                        text=True,
                         timeout=120
                     )
-                
-                if unfold_response.status_code == 200:
-                    # Save DXF response
-                    dxf_filename = f"part_{part_id}.dxf"
-                    dxf_path = os.path.join(temp_dir, dxf_filename)
                     
-                    with open(dxf_path, 'wb') as f:
-                        f.write(unfold_response.content)
+                    logger.info(f"FreeCAD exit code: {result.returncode}")
+                    if result.stdout:
+                        logger.info(f"FreeCAD stdout: {result.stdout}")
+                    if result.stderr:
+                        logger.info(f"FreeCAD stderr: {result.stderr}")
                     
-                    logger.info(f"Successfully converted part {part_id} to DXF")
+                    # Check for output DXF file
+                    dxf_path = os.path.join(output_dir, 'largest_face.dxf')
                     
-                    # Upload DXF to Supabase Storage
-                    supabase_url = os.environ.get('SUPABASE_URL')
-                    supabase_key = os.environ.get('SUPABASE_KEY')
-                    
-                    if not supabase_url or not supabase_key:
-                        return jsonify({'error': 'Missing Supabase configuration'}), 500
-                    
-                    # Upload to Supabase storage
-                    storage_url = f"{supabase_url}/storage/v1/object/dxf-files/{dxf_filename}"
-                    
-                    with open(dxf_path, 'rb') as f:
-                        files_upload = {'file': (dxf_filename, f, 'application/dxf')}
-                        headers = {
-                            'Authorization': f'Bearer {supabase_key}',
-                        }
+                    if result.returncode == 0 and os.path.exists(dxf_path):
+                        logger.info(f"Successfully converted part {part_id} to DXF")
+                        dxf_filename = f"part_{part_id}.dxf"
+                    else:
+                        logger.error(f"Conversion failed. Return code: {result.returncode}")
+                        logger.error(f"Expected DXF at: {dxf_path}")
+                        logger.error(f"DXF exists: {os.path.exists(dxf_path)}")
+                        return jsonify({
+                            'error': 'Conversion failed',
+                            'details': result.stderr if result.stderr else 'No DXF output generated'
+                        }), 500
                         
-                        upload_response = requests.post(storage_url, files=files_upload, headers=headers, timeout=30)
-                        upload_response.raise_for_status()
-                    
-                    # Get public URL for the uploaded DXF
-                    dxf_url = f"{supabase_url}/storage/v1/object/public/dxf-files/{dxf_filename}"
-                    
-                    # Update the parts record with DXF URL
-                    update_url = f"{supabase_url}/rest/v1/parts"
-                    update_headers = {
+                finally:
+                    # Clean up virtual display
+                    xvfb_proc.terminate()
+                
+                # Upload DXF to Supabase Storage
+                supabase_url = os.environ.get('SUPABASE_URL')
+                supabase_key = os.environ.get('SUPABASE_KEY')
+                
+                if not supabase_url or not supabase_key:
+                    return jsonify({'error': 'Missing Supabase configuration'}), 500
+                
+                # Upload to Supabase storage
+                storage_url = f"{supabase_url}/storage/v1/object/dxf-files/{dxf_filename}"
+                
+                with open(dxf_path, 'rb') as f:
+                    files_upload = {'file': (dxf_filename, f, 'application/dxf')}
+                    headers = {
                         'Authorization': f'Bearer {supabase_key}',
-                        'Content-Type': 'application/json',
-                        'apikey': supabase_key
                     }
-                    update_data = {'dxf_url': dxf_url}
-                    update_params = {'id': f'eq.{part_id}'}
                     
-                    update_response = requests.patch(
-                        update_url, 
-                        json=update_data, 
-                        headers=update_headers, 
-                        params=update_params,
-                        timeout=30
-                    )
-                    update_response.raise_for_status()
-                    
-                    logger.info(f"Updated part {part_id} with DXF URL: {dxf_url}")
-                    
-                    return jsonify({
-                        'success': True,
-                        'part_id': part_id,
-                        'dxf_url': dxf_url,
-                        'message': 'STEP file successfully converted and uploaded'
-                    })
-                else:
-                    logger.error(f"Unfold conversion failed: {unfold_response.status_code}")
-                    return jsonify({'error': f'Conversion failed: {unfold_response.text}'}), 500
+                    upload_response = requests.post(storage_url, files=files_upload, headers=headers, timeout=30)
+                    upload_response.raise_for_status()
+                
+                # Get public URL for the uploaded DXF
+                dxf_url = f"{supabase_url}/storage/v1/object/public/dxf-files/{dxf_filename}"
+                
+                # Update the parts record with DXF URL
+                update_url = f"{supabase_url}/rest/v1/parts"
+                update_headers = {
+                    'Authorization': f'Bearer {supabase_key}',
+                    'Content-Type': 'application/json',
+                    'apikey': supabase_key
+                }
+                update_data = {'dxf_url': dxf_url}
+                update_params = {'id': f'eq.{part_id}'}
+                
+                update_response = requests.patch(
+                    update_url, 
+                    json=update_data, 
+                    headers=update_headers, 
+                    params=update_params,
+                    timeout=30
+                )
+                update_response.raise_for_status()
+                
+                logger.info(f"Updated part {part_id} with DXF URL: {dxf_url}")
+                
+                return jsonify({
+                    'success': True,
+                    'part_id': part_id,
+                    'dxf_url': dxf_url,
+                    'message': 'STEP file successfully converted and uploaded'
+                })
                     
             except requests.RequestException as e:
                 logger.error(f"Download/upload error for part {part_id}: {str(e)}")
