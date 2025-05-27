@@ -45,6 +45,8 @@ services:
     env:
       K_FACTOR: "0.38"
       PORT: "8080"
+      SUPABASE_URL: "https://pynaxyfwywlqfvtjbtuc.supabase.co"
+      SUPABASE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5bmF4eWZ3eXdscWZ2dGpidHVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwNzYxNiwiZXhwIjoyMDYzNzgzNjE2fQ.2jv211NlxOdDcbtE6GxGl7kg38JxvwWZx1sPz9HtzBg"
     resources:
       cpu: 2000m
       memory: 4Gi

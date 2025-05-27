@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-RUN pip3 install networkx ezdxf flask werkzeug
+RUN pip3 install networkx ezdxf flask werkzeug requests
 
 # Create app directory
 WORKDIR /app

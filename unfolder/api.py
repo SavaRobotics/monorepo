@@ -8,6 +8,8 @@ import os
 import sys
 import tempfile
 import shutil
+import requests
+import json
 from flask import Flask, request, jsonify, send_file
 from werkzeug.utils import secure_filename
 import logging
@@ -118,6 +120,121 @@ def unfold_step_file():
 def convert_alias():
     """Alias for /unfold endpoint for compatibility"""
     return unfold_step_file()
+
+@app.route('/webhook/step-file', methods=['POST'])
+def webhook_step_file():
+    """
+    Webhook endpoint to handle Supabase triggers
+    Downloads STEP file, converts to DXF, uploads back to Supabase
+    """
+    try:
+        # Parse webhook payload
+        data = request.get_json()
+        if not data or 'record' not in data:
+            return jsonify({'error': 'Invalid webhook payload'}), 400
+        
+        record = data['record']
+        step_url = record.get('step_url')
+        part_id = record.get('id')
+        
+        if not step_url or not part_id:
+            return jsonify({'error': 'Missing step_url or id in record'}), 400
+        
+        logger.info(f"Processing webhook for part {part_id}, step_url: {step_url}")
+        
+        # Download STEP file
+        with tempfile.TemporaryDirectory() as temp_dir:
+            try:
+                # Download the STEP file
+                response = requests.get(step_url, timeout=30)
+                response.raise_for_status()
+                
+                # Save to temp file
+                step_filename = f"part_{part_id}.step"
+                step_path = os.path.join(temp_dir, step_filename)
+                
+                with open(step_path, 'wb') as f:
+                    f.write(response.content)
+                
+                logger.info(f"Downloaded STEP file: {step_filename}")
+                
+                # Convert to DXF
+                dxf_filename = f"part_{part_id}.dxf"
+                dxf_path = os.path.join(temp_dir, dxf_filename)
+                
+                # Set K-factor from environment or default
+                kfactor = os.environ.get('K_FACTOR', '0.38')
+                os.environ['K_FACTOR'] = kfactor
+                
+                # Convert STEP to DXF
+                success = convert_step_to_dxf(step_path, dxf_path)
+                
+                if success and os.path.exists(dxf_path):
+                    logger.info(f"Successfully converted part {part_id} to DXF")
+                    
+                    # Upload DXF to Supabase Storage
+                    supabase_url = os.environ.get('SUPABASE_URL')
+                    supabase_key = os.environ.get('SUPABASE_KEY')
+                    
+                    if not supabase_url or not supabase_key:
+                        return jsonify({'error': 'Missing Supabase configuration'}), 500
+                    
+                    # Upload to Supabase storage
+                    storage_url = f"{supabase_url}/storage/v1/object/dxf-files/{dxf_filename}"
+                    
+                    with open(dxf_path, 'rb') as f:
+                        files = {'file': (dxf_filename, f, 'application/dxf')}
+                        headers = {
+                            'Authorization': f'Bearer {supabase_key}',
+                        }
+                        
+                        upload_response = requests.post(storage_url, files=files, headers=headers, timeout=30)
+                        upload_response.raise_for_status()
+                    
+                    # Get public URL for the uploaded DXF
+                    dxf_url = f"{supabase_url}/storage/v1/object/public/dxf-files/{dxf_filename}"
+                    
+                    # Update the parts record with DXF URL
+                    update_url = f"{supabase_url}/rest/v1/parts"
+                    update_headers = {
+                        'Authorization': f'Bearer {supabase_key}',
+                        'Content-Type': 'application/json',
+                        'apikey': supabase_key
+                    }
+                    update_data = {'dxf_url': dxf_url}
+                    update_params = {'id': f'eq.{part_id}'}
+                    
+                    update_response = requests.patch(
+                        update_url, 
+                        json=update_data, 
+                        headers=update_headers, 
+                        params=update_params,
+                        timeout=30
+                    )
+                    update_response.raise_for_status()
+                    
+                    logger.info(f"Updated part {part_id} with DXF URL: {dxf_url}")
+                    
+                    return jsonify({
+                        'success': True,
+                        'part_id': part_id,
+                        'dxf_url': dxf_url,
+                        'message': 'STEP file successfully converted and uploaded'
+                    })
+                else:
+                    logger.error(f"Conversion failed for part {part_id}")
+                    return jsonify({'error': 'STEP to DXF conversion failed'}), 500
+                    
+            except requests.RequestException as e:
+                logger.error(f"Download/upload error for part {part_id}: {str(e)}")
+                return jsonify({'error': f'Network error: {str(e)}'}), 500
+            except Exception as e:
+                logger.error(f"Processing error for part {part_id}: {str(e)}")
+                return jsonify({'error': f'Processing failed: {str(e)}'}), 500
+        
+    except Exception as e:
+        logger.error(f"Webhook error: {str(e)}")
+        return jsonify({'error': f'Webhook processing failed: {str(e)}'}), 500
 
 @app.route('/', methods=['GET'])
 def root():
