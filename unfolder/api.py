@@ -83,14 +83,6 @@ def unfold_step_file():
             env = os.environ.copy()
             env['K_FACTOR'] = str(kfactor)
             env['OUTPUT_DIR'] = output_dir
-            env['DISPLAY'] = ':99'
-            
-            # Start virtual display (FreeCAD needs this)
-            xvfb_proc = subprocess.Popen(['Xvfb', ':99', '-screen', '0', '1024x768x24'], 
-                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            # Wait a moment for Xvfb to start
-            import time
-            time.sleep(2)
             
             try:
                 # Check if script exists
@@ -101,9 +93,9 @@ def unfold_step_file():
                         first_line = f.readline().strip()
                         logger.info(f"First line of script: {first_line}")
                 
-                # Use the working FreeCAD approach
+                # Use FreeCAD in headless mode
                 cmd = [
-                    'freecad', 
+                    'freecad-cmd', 
                     step_path, 
                     '-c', script_path
                 ]
@@ -148,10 +140,6 @@ def unfold_step_file():
                         'error': 'Conversion failed',
                         'details': result.stderr if result.stderr else 'No DXF output generated'
                     }), 500
-                    
-            finally:
-                # Clean up virtual display
-                xvfb_proc.terminate()
                 
     except Exception as e:
         logger.error(f"Request processing error: {str(e)}")
@@ -207,14 +195,6 @@ def webhook_step_file():
                 env = os.environ.copy()
                 env['K_FACTOR'] = os.environ.get('K_FACTOR', '0.38')
                 env['OUTPUT_DIR'] = output_dir
-                env['DISPLAY'] = ':99'
-                
-                # Start virtual display (FreeCAD needs this)
-                xvfb_proc = subprocess.Popen(['Xvfb', ':99', '-screen', '0', '1024x768x24'], 
-                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                # Wait a moment for Xvfb to start
-                import time
-                time.sleep(2)
                 
                 try:
                     
@@ -226,9 +206,9 @@ def webhook_step_file():
                             first_line = f.readline().strip()
                             logger.info(f"First line of script: {first_line}")
                     
-                    # Use the working FreeCAD approach
+                    # Use FreeCAD in headless mode
                     cmd = [
-                        'freecad', 
+                        'freecad-cmd', 
                         step_path, 
                         '-c', script_path
                     ]
@@ -267,10 +247,6 @@ def webhook_step_file():
                             'error': 'Conversion failed',
                             'details': result.stderr if result.stderr else 'No DXF output generated'
                         }), 500
-                        
-                finally:
-                    # Clean up virtual display
-                    xvfb_proc.terminate()
                 
                 # Upload DXF to Supabase Storage
                 supabase_url = os.environ.get('SUPABASE_URL')
