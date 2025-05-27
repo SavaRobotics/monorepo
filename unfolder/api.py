@@ -239,6 +239,77 @@ def webhook_step_file():
                     if result.returncode == 0 and os.path.exists(dxf_path):
                         logger.info(f"Successfully converted part {part_id} to DXF")
                         dxf_filename = f"part_{part_id}.dxf"
+                        
+                        # Upload DXF to Supabase Storage
+                        supabase_url = os.environ.get('SUPABASE_URL')
+                        supabase_key = os.environ.get('SUPABASE_KEY')
+                        
+                        if not supabase_url or not supabase_key:
+                            logger.error("Missing Supabase configuration")
+                            return jsonify({'error': 'Missing Supabase configuration'}), 500
+                        
+                        logger.info(f"Uploading DXF to Supabase: {dxf_filename}")
+                        
+                        # Upload to Supabase storage
+                        storage_url = f"{supabase_url}/storage/v1/object/dxf-files/{dxf_filename}"
+                        logger.info(f"Upload URL: {storage_url}")
+                        
+                        try:
+                            with open(dxf_path, 'rb') as f:
+                                files_upload = {'file': (dxf_filename, f, 'application/dxf')}
+                                headers = {
+                                    'Authorization': f'Bearer {supabase_key}',
+                                }
+                                
+                                upload_response = requests.post(storage_url, files=files_upload, headers=headers, timeout=30)
+                                logger.info(f"Upload response status: {upload_response.status_code}")
+                                if upload_response.status_code != 200:
+                                    logger.error(f"Upload response: {upload_response.text}")
+                                upload_response.raise_for_status()
+                                logger.info("DXF upload successful")
+                        except Exception as e:
+                            logger.error(f"DXF upload failed: {e}")
+                            return jsonify({'error': f'DXF upload failed: {str(e)}'}), 500
+                        
+                        # Get public URL for the uploaded DXF
+                        dxf_url = f"{supabase_url}/storage/v1/object/public/dxf-files/{dxf_filename}"
+                        
+                        # Update the parts record with DXF URL
+                        logger.info(f"Updating part {part_id} with DXF URL")
+                        update_url = f"{supabase_url}/rest/v1/parts"
+                        update_headers = {
+                            'Authorization': f'Bearer {supabase_key}',
+                            'Content-Type': 'application/json',
+                            'apikey': supabase_key
+                        }
+                        update_data = {'dxf_url': dxf_url}
+                        update_params = {'id': f'eq.{part_id}'}
+                        
+                        try:
+                            update_response = requests.patch(
+                                update_url, 
+                                json=update_data, 
+                                headers=update_headers, 
+                                params=update_params,
+                                timeout=30
+                            )
+                            logger.info(f"Update response status: {update_response.status_code}")
+                            if update_response.status_code != 200:
+                                logger.error(f"Update response: {update_response.text}")
+                            update_response.raise_for_status()
+                            logger.info("Database update successful")
+                        except Exception as e:
+                            logger.error(f"Database update failed: {e}")
+                            return jsonify({'error': f'Database update failed: {str(e)}'}), 500
+                        
+                        logger.info(f"Updated part {part_id} with DXF URL: {dxf_url}")
+                        
+                        return jsonify({
+                            'success': True,
+                            'part_id': part_id,
+                            'dxf_url': dxf_url,
+                            'message': 'STEP file successfully converted and uploaded'
+                        })
                     else:
                         logger.error(f"Conversion failed. Return code: {result.returncode}")
                         logger.error(f"Expected DXF at: {dxf_path}")
@@ -247,77 +318,6 @@ def webhook_step_file():
                             'error': 'Conversion failed',
                             'details': result.stderr if result.stderr else 'No DXF output generated'
                         }), 500
-                
-                # Upload DXF to Supabase Storage
-                supabase_url = os.environ.get('SUPABASE_URL')
-                supabase_key = os.environ.get('SUPABASE_KEY')
-                
-                if not supabase_url or not supabase_key:
-                    logger.error("Missing Supabase configuration")
-                    return jsonify({'error': 'Missing Supabase configuration'}), 500
-                
-                logger.info(f"Uploading DXF to Supabase: {dxf_filename}")
-                
-                # Upload to Supabase storage
-                storage_url = f"{supabase_url}/storage/v1/object/dxf-files/{dxf_filename}"
-                logger.info(f"Upload URL: {storage_url}")
-                
-                try:
-                    with open(dxf_path, 'rb') as f:
-                        files_upload = {'file': (dxf_filename, f, 'application/dxf')}
-                        headers = {
-                            'Authorization': f'Bearer {supabase_key}',
-                        }
-                        
-                        upload_response = requests.post(storage_url, files=files_upload, headers=headers, timeout=30)
-                        logger.info(f"Upload response status: {upload_response.status_code}")
-                        if upload_response.status_code != 200:
-                            logger.error(f"Upload response: {upload_response.text}")
-                        upload_response.raise_for_status()
-                        logger.info("DXF upload successful")
-                except Exception as e:
-                    logger.error(f"DXF upload failed: {e}")
-                    return jsonify({'error': f'DXF upload failed: {str(e)}'}), 500
-                
-                # Get public URL for the uploaded DXF
-                dxf_url = f"{supabase_url}/storage/v1/object/public/dxf-files/{dxf_filename}"
-                
-                # Update the parts record with DXF URL
-                logger.info(f"Updating part {part_id} with DXF URL")
-                update_url = f"{supabase_url}/rest/v1/parts"
-                update_headers = {
-                    'Authorization': f'Bearer {supabase_key}',
-                    'Content-Type': 'application/json',
-                    'apikey': supabase_key
-                }
-                update_data = {'dxf_url': dxf_url}
-                update_params = {'id': f'eq.{part_id}'}
-                
-                try:
-                    update_response = requests.patch(
-                        update_url, 
-                        json=update_data, 
-                        headers=update_headers, 
-                        params=update_params,
-                        timeout=30
-                    )
-                    logger.info(f"Update response status: {update_response.status_code}")
-                    if update_response.status_code != 200:
-                        logger.error(f"Update response: {update_response.text}")
-                    update_response.raise_for_status()
-                    logger.info("Database update successful")
-                except Exception as e:
-                    logger.error(f"Database update failed: {e}")
-                    return jsonify({'error': f'Database update failed: {str(e)}'}), 500
-                
-                logger.info(f"Updated part {part_id} with DXF URL: {dxf_url}")
-                
-                return jsonify({
-                    'success': True,
-                    'part_id': part_id,
-                    'dxf_url': dxf_url,
-                    'message': 'STEP file successfully converted and uploaded'
-                })
                     
             except requests.RequestException as e:
                 logger.error(f"Download/upload error for part {part_id}: {str(e)}")
