@@ -140,6 +140,10 @@ def unfold_step_file():
                         'error': 'Conversion failed',
                         'details': result.stderr if result.stderr else 'No DXF output generated'
                     }), 500
+                    
+            except Exception as e:
+                logger.error(f"FreeCAD processing error: {str(e)}")
+                return jsonify({'error': f'FreeCAD processing failed: {str(e)}'}), 500
                 
     except Exception as e:
         logger.error(f"Request processing error: {str(e)}")
