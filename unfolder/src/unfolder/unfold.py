@@ -71,23 +71,36 @@ part.Shape = largest_face
 doc.recompute()
 
 output_dir = os.environ.get("OUTPUT_DIR", "/app/output")
+print(f"Output directory: {output_dir}")
 os.makedirs(output_dir, exist_ok=True)
 
 raw_dxf_path = os.path.join(output_dir, "largest_face_raw.dxf")
 final_dxf_path = os.path.join(output_dir, "largest_face.dxf")
 step_path = os.path.join(output_dir, "unbend_model.step")
 
-importDXF.export([part], raw_dxf_path)
+print(f"Exporting DXF to: {raw_dxf_path}")
+try:
+    importDXF.export([part], raw_dxf_path)
+    print(f"Raw DXF exported successfully. File exists: {os.path.exists(raw_dxf_path)}")
+except Exception as e:
+    print(f"DXF export failed: {e}")
 
 # Reorient the DXF to ensure it's on the XY plane
 import sys
 sys.path.append("/app/src/unfolder")
-from orientdxf import transform_entities
+try:
+    from orientdxf import transform_entities
+    
+    print("Reorienting DXF to XY plane...")
+    transform_entities(raw_dxf_path, final_dxf_path)
+    print(f"DXF reorientation complete. Final file exists: {os.path.exists(final_dxf_path)}")
+except Exception as e:
+    print(f"DXF reorientation failed: {e}")
 
-print("Reorienting DXF to XY plane...")
-transform_entities(raw_dxf_path, final_dxf_path)
-print("DXF reorientation complete.")
-
-Part.export([unfold_obj], step_path)
+try:
+    Part.export([unfold_obj], step_path)
+    print(f"STEP export complete. File exists: {os.path.exists(step_path)}")
+except Exception as e:
+    print(f"STEP export failed: {e}")
 
 exit(0)
