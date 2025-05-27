@@ -1,7 +1,8 @@
 name: yamuna-manufacturing
 services:
   # Step-converter webhook service (replaces EC2 PM2 service)
-  - name: step-converter
+  step-converter:
+    type: web
     image:
       repository: yamuna-step-converter
       tag: latest
@@ -10,15 +11,13 @@ services:
       method: docker
       context: ./step-converter
       dockerfile: ./Dockerfile
+    source:
+      type: local
     env:
-      - name: PORT
-        value: "3000"
-      - name: SUPABASE_URL
-        value: "https://pynaxyfwywlqfvtjbtuc.supabase.co"
-      - name: SUPABASE_KEY
-        value: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5bmF4eWZ3eXdscWZ2dGpidHVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwNzYxNiwiZXhwIjoyMDYzNzgzNjE2fQ.2jv211NlxOdDcbtE6GxGl7kg38JxvwWZx1sPz9HtzBg"
-      - name: UNFOLDER_SERVICE_URL
-        value: "http://unfolder:8080"
+      PORT: "3000"
+      SUPABASE_URL: "https://pynaxyfwywlqfvtjbtuc.supabase.co"
+      SUPABASE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5bmF4eWZ3eXdscWZ2dGpidHVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwNzYxNiwiZXhwIjoyMDYzNzgzNjE2fQ.2jv211NlxOdDcbtE6GxGl7kg38JxvwWZx1sPz9HtzBg"
+      UNFOLDER_SERVICE_URL: "http://unfolder:8080"
     resources:
       cpu: 500m
       memory: 1Gi
@@ -31,7 +30,8 @@ services:
       - name: step-converter
         
   # Unfolder service (STEP to DXF conversion)
-  - name: unfolder
+  unfolder:
+    type: web
     image:
       repository: yamuna-unfolder
       tag: latest
@@ -40,11 +40,11 @@ services:
       method: docker
       context: ./unfolder
       dockerfile: ./Dockerfile
+    source:
+      type: local
     env:
-      - name: K_FACTOR
-        value: "0.38"
-      - name: PORT
-        value: "8080"
+      K_FACTOR: "0.38"
+      PORT: "8080"
     resources:
       cpu: 2000m
       memory: 4Gi
@@ -55,7 +55,8 @@ services:
       target_cpu: 80
 
   # Nester service (AI-powered nesting optimization)
-  - name: nester
+  nester:
+    type: web
     image:
       repository: yamuna-nester
       tag: latest
@@ -64,15 +65,13 @@ services:
       method: docker
       context: ./nester
       dockerfile: ./Dockerfile
+    source:
+      type: local
     env:
-      - name: COLLISION_BUFFER
-        value: "7.0"
-      - name: SHEET_WIDTH
-        value: "1000"
-      - name: SHEET_HEIGHT
-        value: "500"
-      - name: PORT
-        value: "8080"
+      COLLISION_BUFFER: "7.0"
+      SHEET_WIDTH: "1000"
+      SHEET_HEIGHT: "500"
+      PORT: "8080"
     resources:
       cpu: 1000m
       memory: 2Gi
