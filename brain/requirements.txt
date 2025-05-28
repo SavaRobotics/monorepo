@@ -12,3 +12,6 @@ rich>=13.7.0
 typer>=0.9.0
 requests>=2.31.0
 supabase>=2.0.0
+ezdxf>=1.1.0
+shapely>=2.0.0
+numpy>=1.24.0
