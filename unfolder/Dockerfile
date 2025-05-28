@@ -28,11 +28,11 @@ RUN mkdir -p /app/input /app/output
 ENV PYTHONPATH=/app
 
 # Expose port for API
-EXPOSE 8080
+EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"
+  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:3000/health')"
 
 # Start the API server
 CMD ["python3", "/app/api.py"]
