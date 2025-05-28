@@ -281,43 +281,43 @@ def webhook_step_file():
                     logger.info(f"Update data: {update_data}")
                     
                     try:
-                        # Use curl directly since it works perfectly
-                        curl_cmd = [
-                            'curl', '-X', 'PATCH', update_url,
-                            '-H', f'Authorization: Bearer {supabase_key}',
-                            '-H', 'Content-Type: application/json',
-                            '-H', f'apikey: {supabase_key}',
-                            '-H', 'Prefer: return=representation',
-                            '-d', json.dumps(update_data)
-                        ]
+                        # Use requests with exact headers that work manually
+                        update_headers = {
+                            'Authorization': f'Bearer {supabase_key}',
+                            'Content-Type': 'application/json',
+                            'apikey': supabase_key,
+                            'Prefer': 'return=representation'
+                        }
                         
-                        logger.info(f"Running curl command for database update")
-                        result = subprocess.run(
-                            curl_cmd,
-                            capture_output=True,
-                            text=True,
+                        logger.info(f"Making database update request")
+                        update_response = requests.patch(
+                            update_url, 
+                            json=update_data, 
+                            headers=update_headers,
                             timeout=30
                         )
                         
-                        logger.info(f"Curl exit code: {result.returncode}")
-                        logger.info(f"Curl stdout: {result.stdout}")
-                        if result.stderr:
-                            logger.error(f"Curl stderr: {result.stderr}")
+                        logger.info(f"Update response status: {update_response.status_code}")
+                        logger.info(f"Update response headers: {dict(update_response.headers)}")
+                        logger.info(f"Update response body: {update_response.text}")
                         
-                        if result.returncode == 0:
+                        if update_response.status_code in [200, 204]:
                             logger.info("Database update successful")
-                            # Parse the response to verify the update worked
-                            if result.stdout.strip():
+                            # Verify the update worked by checking the response
+                            if update_response.text.strip():
                                 try:
-                                    response_data = json.loads(result.stdout)
+                                    response_data = json.loads(update_response.text)
                                     if isinstance(response_data, list) and len(response_data) > 0:
                                         updated_dxf_url = response_data[0].get('dxf_url')
                                         logger.info(f"Verified dxf_url updated to: {updated_dxf_url}")
+                                    else:
+                                        logger.warning("Database update returned empty response")
                                 except Exception as e:
-                                    logger.warning(f"Could not parse curl response: {e}")
+                                    logger.warning(f"Could not parse response: {e}")
                         else:
-                            logger.error(f"Curl failed with exit code {result.returncode}")
-                            return jsonify({'error': f'Database update failed: {result.stderr}'}), 500
+                            logger.error(f"Update failed with status {update_response.status_code}")
+                            logger.error(f"Response: {update_response.text}")
+                            return jsonify({'error': f'Database update failed: HTTP {update_response.status_code}'}), 500
                     except Exception as e:
                         logger.error(f"Database update failed: {e}")
                         return jsonify({'error': f'Database update failed: {str(e)}'}), 500
