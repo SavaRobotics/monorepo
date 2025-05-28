@@ -27,6 +27,11 @@ RUN mkdir -p /app/input /app/output
 # Set Python path
 ENV PYTHONPATH=/app
 
+# Set Supabase environment variables (fallback if porter.yaml doesn't work)
+ENV SUPABASE_URL="https://pynaxyfwywlqfvtjbtuc.supabase.co"
+ENV SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5bmF4eWZ3eXdscWZ2dGpidHVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwNzYxNiwiZXhwIjoyMDYzNzgzNjE2fQ.2jv211NlxOdDcbtE6GxGl7kg38JxvwWZx1sPz9HtzBg"
+ENV K_FACTOR="0.38"
+
 # Expose port for API
 EXPOSE 3000
 
