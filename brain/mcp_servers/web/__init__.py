@@ -1,1 +1,0 @@
-"""Web operations MCP server."""

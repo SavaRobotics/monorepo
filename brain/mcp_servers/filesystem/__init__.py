@@ -1,1 +1,0 @@
-"""Filesystem operations MCP server."""

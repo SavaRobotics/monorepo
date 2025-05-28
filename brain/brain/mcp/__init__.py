@@ -1,1 +1,0 @@
-"""MCP client and configuration module."""
