@@ -272,7 +272,8 @@ def webhook_step_file():
                     update_headers = {
                         'Authorization': f'Bearer {supabase_key}',
                         'Content-Type': 'application/json',
-                        'apikey': supabase_key
+                        'apikey': supabase_key,
+                        'Prefer': 'return=representation'
                     }
                     update_data = {'dxf_url': dxf_url}
                     
@@ -280,21 +281,43 @@ def webhook_step_file():
                     logger.info(f"Update data: {update_data}")
                     
                     try:
-                        update_response = requests.patch(
-                            update_url, 
-                            json=update_data, 
-                            headers=update_headers,
+                        # Use curl directly since it works perfectly
+                        curl_cmd = [
+                            'curl', '-X', 'PATCH', update_url,
+                            '-H', f'Authorization: Bearer {supabase_key}',
+                            '-H', 'Content-Type: application/json',
+                            '-H', f'apikey: {supabase_key}',
+                            '-H', 'Prefer: return=representation',
+                            '-d', json.dumps(update_data)
+                        ]
+                        
+                        logger.info(f"Running curl command for database update")
+                        result = subprocess.run(
+                            curl_cmd,
+                            capture_output=True,
+                            text=True,
                             timeout=30
                         )
-                        logger.info(f"Update response status: {update_response.status_code}")
-                        logger.info(f"Update response headers: {dict(update_response.headers)}")
-                        logger.info(f"Update response body: {update_response.text}")
                         
-                        if update_response.status_code not in [200, 204]:
-                            logger.error(f"Update failed with status {update_response.status_code}")
-                            logger.error(f"Response: {update_response.text}")
-                        update_response.raise_for_status()
-                        logger.info("Database update successful")
+                        logger.info(f"Curl exit code: {result.returncode}")
+                        logger.info(f"Curl stdout: {result.stdout}")
+                        if result.stderr:
+                            logger.error(f"Curl stderr: {result.stderr}")
+                        
+                        if result.returncode == 0:
+                            logger.info("Database update successful")
+                            # Parse the response to verify the update worked
+                            if result.stdout.strip():
+                                try:
+                                    response_data = json.loads(result.stdout)
+                                    if isinstance(response_data, list) and len(response_data) > 0:
+                                        updated_dxf_url = response_data[0].get('dxf_url')
+                                        logger.info(f"Verified dxf_url updated to: {updated_dxf_url}")
+                                except Exception as e:
+                                    logger.warning(f"Could not parse curl response: {e}")
+                        else:
+                            logger.error(f"Curl failed with exit code {result.returncode}")
+                            return jsonify({'error': f'Database update failed: {result.stderr}'}), 500
                     except Exception as e:
                         logger.error(f"Database update failed: {e}")
                         return jsonify({'error': f'Database update failed: {str(e)}'}), 500
