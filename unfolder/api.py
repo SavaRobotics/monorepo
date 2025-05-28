@@ -267,7 +267,7 @@ def webhook_step_file():
                     dxf_url = f"{supabase_url}/storage/v1/object/public/dxffiles/{dxf_filename}"
                     
                     # Update the parts record with DXF URL
-                    logger.info(f"Updating part {part_id} with DXF URL")
+                    logger.info(f"Updating part {part_id} with DXF URL: {dxf_url}")
                     update_url = f"{supabase_url}/rest/v1/parts"
                     update_headers = {
                         'Authorization': f'Bearer {supabase_key}',
@@ -276,6 +276,10 @@ def webhook_step_file():
                     }
                     update_data = {'dxf_url': dxf_url}
                     update_params = {'id': f'eq.{part_id}'}
+                    
+                    logger.info(f"Update URL: {update_url}")
+                    logger.info(f"Update params: {update_params}")
+                    logger.info(f"Update data: {update_data}")
                     
                     try:
                         update_response = requests.patch(
@@ -286,7 +290,7 @@ def webhook_step_file():
                             timeout=30
                         )
                         logger.info(f"Update response status: {update_response.status_code}")
-                        if update_response.status_code != 200:
+                        if update_response.status_code not in [200, 204]:
                             logger.error(f"Update response: {update_response.text}")
                         update_response.raise_for_status()
                         logger.info("Database update successful")
