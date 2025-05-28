@@ -268,25 +268,22 @@ def webhook_step_file():
                     
                     # Update the parts record with DXF URL
                     logger.info(f"Updating part {part_id} with DXF URL: {dxf_url}")
-                    update_url = f"{supabase_url}/rest/v1/parts"
+                    update_url = f"{supabase_url}/rest/v1/parts?id=eq.{part_id}"
                     update_headers = {
                         'Authorization': f'Bearer {supabase_key}',
                         'Content-Type': 'application/json',
                         'apikey': supabase_key
                     }
                     update_data = {'dxf_url': dxf_url}
-                    update_params = {'id': f'eq.{part_id}'}
                     
                     logger.info(f"Update URL: {update_url}")
-                    logger.info(f"Update params: {update_params}")
                     logger.info(f"Update data: {update_data}")
                     
                     try:
                         update_response = requests.patch(
                             update_url, 
                             json=update_data, 
-                            headers=update_headers, 
-                            params=update_params,
+                            headers=update_headers,
                             timeout=30
                         )
                         logger.info(f"Update response status: {update_response.status_code}")
