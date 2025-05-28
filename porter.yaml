@@ -1,4 +1,4 @@
-name: yamuna-manufacturing
+name: yamuna-unfolder
 services:
   # Unfolder service (STEP to DXF conversion)
   unfolder:
