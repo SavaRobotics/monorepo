@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 import httpx
 from fastmcp import FastMCP
+from datetime import datetime
 
 # Import the nesting functionality
 from .nest import DXFNester
@@ -220,6 +221,83 @@ async def upload_nested_result(
             "success": False,
             "error": str(e),
             "message": f"Upload failed: {str(e)}"
+        }
+
+@mcp.tool(
+    description="Upload nested DXF file to Supabase storage bucket"
+)
+async def upload_to_supabase(
+    nested_dxf_path: str,
+    supabase_url: str,
+    supabase_key: str,
+    bucket_name: Optional[str] = "dxffiles",
+    folder_path: Optional[str] = "nested"
+) -> Dict:
+    """
+    Upload the nested DXF file to Supabase storage.
+    
+    Args:
+        nested_dxf_path: Path to the nested DXF file
+        supabase_url: Supabase project URL
+        supabase_key: Supabase API key (service role key for uploads)
+        bucket_name: Storage bucket name (default: "dxffiles")
+        folder_path: Folder path within the bucket (default: "nested")
+        
+    Returns:
+        Dictionary containing:
+        - success: Boolean indicating if upload succeeded
+        - public_url: Public URL of the uploaded file
+        - path: Storage path of the file
+        - message: Status message
+    """
+    try:
+        # Lazy import to avoid dependency issues if not using this tool
+        from supabase import create_client
+        
+        if not os.path.exists(nested_dxf_path):
+            return {
+                "success": False,
+                "error": "Nested DXF file not found",
+                "message": f"File not found at: {nested_dxf_path}"
+            }
+        
+        # Initialize Supabase client
+        supabase = create_client(supabase_url, supabase_key)
+        
+        # Generate unique filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"nested_layout_{timestamp}.dxf"
+        storage_path = f"{folder_path}/{filename}" if folder_path else filename
+        
+        # Read the file
+        with open(nested_dxf_path, 'rb') as f:
+            file_content = f.read()
+        
+        # Upload to Supabase storage
+        response = supabase.storage.from_(bucket_name).upload(
+            path=storage_path,
+            file=file_content,
+            file_options={"content-type": "application/dxf"}
+        )
+        
+        # Get public URL
+        public_url = supabase.storage.from_(bucket_name).get_public_url(storage_path)
+        
+        return {
+            "success": True,
+            "public_url": public_url,
+            "path": storage_path,
+            "bucket": bucket_name,
+            "filename": filename,
+            "file_size": len(file_content),
+            "message": f"Successfully uploaded to Supabase storage: {storage_path}"
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "message": f"Supabase upload failed: {str(e)}"
         }
 
 if __name__ == "__main__":
