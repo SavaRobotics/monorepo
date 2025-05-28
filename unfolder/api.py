@@ -245,7 +245,7 @@ def webhook_step_file():
                     logger.info(f"Uploading DXF to Supabase: {dxf_filename}")
                     
                     # Upload to Supabase storage
-                    storage_url = f"{supabase_url}/storage/v1/object/dxf-files/{dxf_filename}"
+                    storage_url = f"{supabase_url}/storage/v1/object/dxffiles/{dxf_filename}"
                     logger.info(f"Upload URL: {storage_url}")
                     
                     try:
@@ -264,7 +264,7 @@ def webhook_step_file():
                         return jsonify({'error': f'DXF upload failed: {str(e)}'}), 500
                     
                     # Get public URL for the uploaded DXF
-                    dxf_url = f"{supabase_url}/storage/v1/object/public/dxf-files/{dxf_filename}"
+                    dxf_url = f"{supabase_url}/storage/v1/object/public/dxffiles/{dxf_filename}"
                     
                     # Update the parts record with DXF URL
                     logger.info(f"Updating part {part_id} with DXF URL")
