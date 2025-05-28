@@ -287,8 +287,12 @@ def webhook_step_file():
                             timeout=30
                         )
                         logger.info(f"Update response status: {update_response.status_code}")
+                        logger.info(f"Update response headers: {dict(update_response.headers)}")
+                        logger.info(f"Update response body: {update_response.text}")
+                        
                         if update_response.status_code not in [200, 204]:
-                            logger.error(f"Update response: {update_response.text}")
+                            logger.error(f"Update failed with status {update_response.status_code}")
+                            logger.error(f"Response: {update_response.text}")
                         update_response.raise_for_status()
                         logger.info("Database update successful")
                     except Exception as e:
