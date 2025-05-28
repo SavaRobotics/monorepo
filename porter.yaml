@@ -21,8 +21,8 @@ services:
     resources:
       cpu: 2000m
       memory: 4Gi
-    # Force rebuild with curl fix
-    env_version: "curl-fix-v1"
+    # Force rebuild with requests fix
+    env_version: "requests-fix-v2"
     autoscaling:
       enabled: true
       min_replicas: 1
