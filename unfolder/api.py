@@ -267,6 +267,9 @@ def webhook_step_file():
                     dxf_url = f"{supabase_url}/storage/v1/object/public/dxffiles/{dxf_filename}"
                     
                     # Update the parts record with DXF URL
+                    # Wait a moment for database transaction to fully commit
+                    import time
+                    time.sleep(1)
                     logger.info(f"Updating part {part_id} with DXF URL: {dxf_url}")
                     update_url = f"{supabase_url}/rest/v1/parts?id=eq.{part_id}"
                     update_headers = {
