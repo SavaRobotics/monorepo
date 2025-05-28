@@ -1,34 +1,5 @@
 name: yamuna-manufacturing
 services:
-  # Step-converter webhook service (replaces EC2 PM2 service)
-  step-converter:
-    type: web
-    image:
-      repository: yamuna-step-converter
-      tag: latest
-    port: 3000
-    build:
-      method: docker
-      context: ./step-converter
-      dockerfile: ./Dockerfile
-    source:
-      type: local
-    env:
-      PORT: "3000"
-      SUPABASE_URL: "https://pynaxyfwywlqfvtjbtuc.supabase.co"
-      SUPABASE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5bmF4eWZ3eXdscWZ2dGpidHVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwNzYxNiwiZXhwIjoyMDYzNzgzNjE2fQ.2jv211NlxOdDcbtE6GxGl7kg38JxvwWZx1sPz9HtzBg"
-      UNFOLDER_SERVICE_URL: "http://unfolder:8080"
-    resources:
-      cpu: 500m
-      memory: 1Gi
-    autoscaling:
-      enabled: true
-      min_replicas: 1
-      max_replicas: 3
-      target_cpu: 70
-    domains:
-      - name: step-converter
-        
   # Unfolder service (STEP to DXF conversion)
   unfolder:
     type: web
@@ -44,7 +15,7 @@ services:
       type: local
     env:
       K_FACTOR: "0.38"
-      PORT: "8080"
+      PORT: "3000"
       SUPABASE_URL: "https://pynaxyfwywlqfvtjbtuc.supabase.co"
       SUPABASE_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5bmF4eWZ3eXdscWZ2dGpidHVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwNzYxNiwiZXhwIjoyMDYzNzgzNjE2fQ.2jv211NlxOdDcbtE6GxGl7kg38JxvwWZx1sPz9HtzBg"
     resources:
@@ -55,25 +26,3 @@ services:
       min_replicas: 1
       max_replicas: 2
       target_cpu: 80
-
-  # Nester service (AI-powered nesting optimization)
-  nester:
-    type: web
-    image:
-      repository: yamuna-nester
-      tag: latest
-    port: 8080
-    build:
-      method: docker
-      context: ./nester
-      dockerfile: ./Dockerfile
-    source:
-      type: local
-    env:
-      COLLISION_BUFFER: "7.0"
-      SHEET_WIDTH: "1000"
-      SHEET_HEIGHT: "500"
-      PORT: "8080"
-    resources:
-      cpu: 1000m
-      memory: 2Gi
