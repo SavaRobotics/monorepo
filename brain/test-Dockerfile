@@ -1,0 +1,45 @@
+FROM ubuntu:22.04
+
+# Avoid interactive prompts during build
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install Node.js, FreeCAD and dependencies
+RUN apt-get update && apt-get install -y \
+    freecad \
+    python3 \
+    python3-pip \
+    xvfb \
+    curl \
+    nodejs \
+    npm \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip3 install networkx ezdxf
+
+# Create app directory
+WORKDIR /app
+
+# Copy unfolder source code
+COPY src/mcp_servers/unfolder/src/ /app/src/
+
+# Copy TypeScript test file and package files
+COPY test-unfolder.ts package.json tsconfig.json ./
+
+# Install Node dependencies
+RUN npm install
+
+# Create input/output directories
+RUN mkdir -p /app/input /app/output
+
+# Set Python path
+ENV PYTHONPATH=/app
+
+# Set default K-factor
+ENV K_FACTOR="0.38"
+
+# Compile TypeScript
+RUN npx tsc
+
+# Default command runs the TypeScript test
+CMD ["xvfb-run", "-a", "node", "test-unfolder.js"]
