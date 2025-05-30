@@ -137,11 +137,14 @@ class ToolpathGenerator:
         return total_length
     
     def _calculate_tab_positions(self, contour: List[Geometry], total_length: float) -> List[Tab]:
-        """Calculate optimal tab positions along contour"""
+        """Calculate optimal tab positions along contour avoiding corners"""
         tabs = []
         
         if not self.config.tabs.enabled:
             return tabs
+        
+        # First, identify corners in the contour
+        corners = self._find_corners(contour)
         
         # Calculate number of tabs
         num_tabs = max(
@@ -149,16 +152,63 @@ class ToolpathGenerator:
             int(total_length / self.config.tabs.spacing)
         )
         
-        # Distribute tabs evenly
+        # Try to distribute tabs evenly while avoiding corners
         tab_spacing = total_length / num_tabs
         
-        for i in range(num_tabs):
-            # Find position along contour
-            target_distance = i * tab_spacing + tab_spacing / 2
+        # Generate candidate positions
+        candidate_positions = []
+        for i in range(num_tabs * 3):  # Generate 3x candidates to have options
+            distance = (i * tab_spacing / 3) % total_length
+            if self._is_valid_tab_position(distance, corners, total_length):
+                candidate_positions.append(distance)
+        
+        # Select the best num_tabs positions
+        if len(candidate_positions) >= num_tabs:
+            # Sort and pick evenly distributed ones
+            candidate_positions.sort()
+            selected_positions = []
             
+            # Start with the first valid position
+            if candidate_positions:
+                selected_positions.append(candidate_positions[0])
+                
+                # Add remaining positions with maximum spacing
+                while len(selected_positions) < num_tabs and candidate_positions:
+                    best_pos = None
+                    best_min_dist = 0
+                    
+                    for pos in candidate_positions:
+                        if pos not in selected_positions:
+                            # Calculate minimum distance to already selected positions
+                            min_dist = float('inf')
+                            for sel_pos in selected_positions:
+                                dist = min(abs(pos - sel_pos), total_length - abs(pos - sel_pos))
+                                min_dist = min(min_dist, dist)
+                            
+                            if min_dist > best_min_dist:
+                                best_min_dist = min_dist
+                                best_pos = pos
+                    
+                    if best_pos is not None:
+                        selected_positions.append(best_pos)
+                    else:
+                        break
+        else:
+            # Fallback: use original positions but check for corners
+            selected_positions = []
+            for i in range(num_tabs):
+                target_distance = i * tab_spacing + tab_spacing / 2
+                # Adjust if too close to corner
+                adjusted_distance = self._adjust_position_away_from_corners(
+                    target_distance, corners, total_length
+                )
+                selected_positions.append(adjusted_distance)
+        
+        # Create tabs at selected positions
+        for target_distance in selected_positions:
             # Find the geometry segment containing this position
             current_distance = 0
-            for geom in contour:
+            for j, geom in enumerate(contour):
                 segment_length = self._get_segment_length(geom)
                 
                 if current_distance + segment_length >= target_distance:
@@ -178,6 +228,131 @@ class ToolpathGenerator:
                 current_distance += segment_length
         
         return tabs
+    
+    def _find_corners(self, contour: List[Geometry]) -> List[float]:
+        """Find corner positions along the contour"""
+        corners = []
+        current_distance = 0
+        
+        for i in range(len(contour)):
+            prev_idx = (i - 1) % len(contour)
+            curr_geom = contour[i]
+            prev_geom = contour[prev_idx]
+            
+            # Calculate angle change at the junction
+            angle_change = self._calculate_angle_change(prev_geom, curr_geom)
+            
+            # If angle change exceeds threshold, it's a corner
+            if abs(angle_change) > np.radians(self.config.tabs.corner_angle_threshold):
+                corners.append(current_distance)
+            
+            current_distance += self._get_segment_length(curr_geom)
+        
+        return corners
+    
+    def _calculate_angle_change(self, geom1: Geometry, geom2: Geometry) -> float:
+        """Calculate angle change between two geometry segments"""
+        # Get direction vectors
+        dir1 = self._get_end_direction(geom1)
+        dir2 = self._get_start_direction(geom2)
+        
+        # Calculate angle between vectors
+        dot_product = dir1[0] * dir2[0] + dir1[1] * dir2[1]
+        # Clamp to [-1, 1] to handle numerical errors
+        dot_product = max(-1, min(1, dot_product))
+        angle = np.arccos(dot_product)
+        
+        # Check if it's a left or right turn
+        cross_product = dir1[0] * dir2[1] - dir1[1] * dir2[0]
+        if cross_product < 0:
+            angle = -angle
+            
+        return angle
+    
+    def _get_end_direction(self, geom: Geometry) -> Tuple[float, float]:
+        """Get the direction vector at the end of a geometry segment"""
+        if geom.type == 'line':
+            dx = geom.end[0] - geom.start[0]
+            dy = geom.end[1] - geom.start[1]
+            length = np.sqrt(dx**2 + dy**2)
+            if length > 0:
+                return (dx/length, dy/length)
+            return (1, 0)
+        elif geom.type == 'arc':
+            # Tangent at end of arc
+            end_angle_rad = np.radians(geom.end_angle)
+            # Tangent is perpendicular to radius
+            return (-np.sin(end_angle_rad), np.cos(end_angle_rad))
+        return (1, 0)
+    
+    def _get_start_direction(self, geom: Geometry) -> Tuple[float, float]:
+        """Get the direction vector at the start of a geometry segment"""
+        if geom.type == 'line':
+            dx = geom.end[0] - geom.start[0]
+            dy = geom.end[1] - geom.start[1]
+            length = np.sqrt(dx**2 + dy**2)
+            if length > 0:
+                return (dx/length, dy/length)
+            return (1, 0)
+        elif geom.type == 'arc':
+            # Tangent at start of arc
+            start_angle_rad = np.radians(geom.start_angle)
+            # Tangent is perpendicular to radius
+            return (-np.sin(start_angle_rad), np.cos(start_angle_rad))
+        return (1, 0)
+    
+    def _is_valid_tab_position(self, distance: float, corners: List[float], 
+                              total_length: float) -> bool:
+        """Check if a position is valid for tab placement (not near corners)"""
+        exclusion_zone = self.config.tabs.corner_exclusion_zone
+        
+        for corner in corners:
+            # Check distance considering wrap-around
+            dist_to_corner = min(
+                abs(distance - corner),
+                abs(distance - corner + total_length),
+                abs(distance - corner - total_length)
+            )
+            
+            if dist_to_corner < exclusion_zone:
+                return False
+        
+        return True
+    
+    def _adjust_position_away_from_corners(self, position: float, corners: List[float], 
+                                         total_length: float) -> float:
+        """Adjust a position to move it away from corners if necessary"""
+        exclusion_zone = self.config.tabs.corner_exclusion_zone
+        
+        # Check if position is too close to any corner
+        for corner in corners:
+            dist_to_corner = min(
+                abs(position - corner),
+                abs(position - corner + total_length),
+                abs(position - corner - total_length)
+            )
+            
+            if dist_to_corner < exclusion_zone:
+                # Move position to exclusion_zone distance from corner
+                # Try both directions and pick the one that moves less
+                option1 = (corner + exclusion_zone) % total_length
+                option2 = (corner - exclusion_zone) % total_length
+                
+                dist1 = min(abs(position - option1), 
+                           abs(position - option1 + total_length),
+                           abs(position - option1 - total_length))
+                dist2 = min(abs(position - option2),
+                           abs(position - option2 + total_length),
+                           abs(position - option2 - total_length))
+                
+                if dist1 < dist2:
+                    position = option1
+                else:
+                    position = option2
+                
+                break
+        
+        return position
     
     def _get_segment_length(self, geom: Geometry) -> float:
         """Get length of a geometry segment"""

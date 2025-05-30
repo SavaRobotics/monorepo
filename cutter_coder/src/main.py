@@ -122,6 +122,8 @@ async def convert_dxf_to_gcode(
     tab_height: Optional[float] = None,
     tab_width: Optional[float] = None,
     tab_spacing: Optional[float] = None,
+    corner_exclusion_zone: Optional[float] = None,
+    corner_angle_threshold: Optional[float] = None,
     output_format: str = "linuxcnc"
 ):
     """Convert DXF file to G-code"""
@@ -169,6 +171,10 @@ async def convert_dxf_to_gcode(
             tab_config.width = tab_width
         if tab_spacing is not None:
             tab_config.spacing = tab_spacing
+        if corner_exclusion_zone is not None:
+            tab_config.corner_exclusion_zone = corner_exclusion_zone
+        if corner_angle_threshold is not None:
+            tab_config.corner_angle_threshold = corner_angle_threshold
         
         # Create cutting configuration
         cutting_config = CuttingConfig(

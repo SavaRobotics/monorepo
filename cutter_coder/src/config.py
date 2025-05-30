@@ -21,6 +21,8 @@ class TabConfig(BaseModel):
     width: float = Field(8.0, description="Tab width in mm")
     spacing: float = Field(100.0, description="Spacing between tabs in mm")
     min_tabs_per_part: int = Field(2, description="Minimum tabs per part")
+    corner_exclusion_zone: float = Field(10.0, description="Distance from corners to avoid placing tabs in mm")
+    corner_angle_threshold: float = Field(45.0, description="Angle change threshold to detect corners in degrees")
 
 class ToolConfig(BaseModel):
     type: ToolType = ToolType.END_MILL
