@@ -5,6 +5,7 @@ import logging
 
 from .config import CuttingConfig, TabConfig
 from .dxf_processor import Part, Geometry
+from .pycam_integration import PyCAMOffsetProcessor, PYCAM_AVAILABLE
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,15 @@ class ToolpathGenerator:
         self.config = config
         self.toolpaths: List[Toolpath] = []
         
+        # Initialize PyCAM offset processor if available
+        self.offset_processor = None
+        if PYCAM_AVAILABLE:
+            try:
+                self.offset_processor = PyCAMOffsetProcessor()
+                logger.info("PyCAM offset processor initialized successfully")
+            except Exception as e:
+                logger.warning(f"Failed to initialize PyCAM offset processor: {e}")
+        
     def generate_toolpaths(self, parts: List[Part]) -> List[Toolpath]:
         """Generate toolpaths for all parts"""
         self.toolpaths = []
@@ -60,6 +70,27 @@ class ToolpathGenerator:
     def _generate_contour_with_tabs(self, part: Part) -> Toolpath:
         """Generate contour toolpath with holding tabs"""
         contour = part.outer_contour
+        
+        # Apply tool offset to the contour
+        # For outer contours, we offset inward (negative) by tool radius
+        tool_radius = self.config.tool.diameter / 2.0
+        offset_contours = []
+        
+        if self.offset_processor:
+            try:
+                # Negative offset for outer contours (cut on the inside)
+                offset_contours = self.offset_processor.offset_contour(contour, -tool_radius)
+                if offset_contours:
+                    logger.info(f"Applied tool offset of {-tool_radius}mm to outer contour")
+                    # Use the first offset contour (should typically be only one for outer contours)
+                    contour = offset_contours[0]
+                else:
+                    logger.warning("Tool offset resulted in no valid contour, using original")
+            except Exception as e:
+                logger.error(f"Failed to apply tool offset: {e}")
+                logger.info("Falling back to original contour")
+        else:
+            logger.warning("No offset processor available, cutting on geometry line")
         
         # Calculate total contour length
         total_length = self._calculate_contour_length(contour)
@@ -116,6 +147,28 @@ class ToolpathGenerator:
     def _generate_hole_toolpath(self, hole: List[Geometry]) -> Toolpath:
         """Generate toolpath for a hole (no tabs)"""
         moves = []
+        
+        # Apply tool offset to the hole
+        # For holes (inside cuts), we offset outward (positive) by tool radius
+        tool_radius = self.config.tool.diameter / 2.0
+        offset_holes = []
+        original_hole = hole
+        
+        if self.offset_processor:
+            try:
+                # Positive offset for holes (cut on the outside)
+                offset_holes = self.offset_processor.offset_contour(hole, tool_radius)
+                if offset_holes:
+                    logger.info(f"Applied tool offset of {tool_radius}mm to hole")
+                    # Use the first offset contour
+                    hole = offset_holes[0]
+                else:
+                    logger.warning("Tool offset resulted in no valid hole contour, using original")
+            except Exception as e:
+                logger.error(f"Failed to apply tool offset to hole: {e}")
+                logger.info("Falling back to original hole geometry")
+        else:
+            logger.warning("No offset processor available, cutting on geometry line")
         
         # Find hole center and radius
         bbox = self._calculate_bbox(hole)
