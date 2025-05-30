@@ -1,6 +1,0 @@
-{
-  "/api/servers/route": "app/api/servers/route.js",
-  "/api/tools/route": "app/api/tools/route.js",
-  "/api/workflow/route": "app/api/workflow/route.js",
-  "/api/workflow/status/[id]/route": "app/api/workflow/status/[id]/route.js"
-}

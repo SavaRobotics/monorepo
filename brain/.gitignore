@@ -10,6 +10,7 @@ coverage/
 build/
 dist/
 out/
+.next/
 
 # Misc
 .DS_Store
@@ -28,6 +29,13 @@ yarn-error.log*
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
 
 # Docker
 .docker/
