@@ -56,11 +56,11 @@
   "exclude": [
     "node_modules",
     "dist",
-<<<<<<< HEAD
+    ".next",
     "src/mcp_servers/**/*.py",
-    "src/mcp_servers/unfolder/src/sheet_metal/Resources/translations/**/*.ts"
-=======
-    "src/mcp_servers/unfolder/src/sheet_metal/**/*"
->>>>>>> c703b3e051e0dc88d106a5cf82560b3894373be3
+    "src/mcp_servers/unfolder/src/sheet_metal/**/*.py",
+    "src/mcp_servers/unfolder/src/sheet_metal/Resources/translations/**/*.ts",
+    "**/*.spec.ts",
+    "**/*.test.ts"
   ]
 }
