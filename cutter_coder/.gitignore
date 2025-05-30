@@ -32,7 +32,6 @@ temp/
 *.gcode
 *.nc
 test_output/
-temp_pycam/
 
 # Docker
 .dockerignore
