@@ -8,7 +8,7 @@ services:
     image: cutter-coder:latest
     container_name: cutter-coder
     ports:
-      - "8000:8000"
+      - "7777:8000"
     volumes:
       # Mount temp directory for file processing
       - ./temp:/tmp/cutter_coder
