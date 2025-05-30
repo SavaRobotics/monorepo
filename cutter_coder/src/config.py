@@ -47,6 +47,9 @@ class CuttingConfig(BaseModel):
     safety_height: float = Field(5.0, description="Safety height above material in mm")
     cutting_direction: str = Field("climb", description="climb or conventional")
     enable_coolant: bool = False
+    arc_interpolation_tolerance: float = Field(0.1, description="Maximum deviation from true arc in mm")
+    min_arc_segments: int = Field(3, description="Minimum segments per arc")
+    max_arc_segments: int = Field(100, description="Maximum segments per arc")
     
 class DXFProcessingConfig(BaseModel):
     layer_filter: Optional[str] = Field("LargestFace", description="Layer to process")

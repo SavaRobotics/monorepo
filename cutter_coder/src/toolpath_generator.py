@@ -518,7 +518,7 @@ class ToolpathGenerator:
             points.append((geom.start[0], geom.start[1], z))
             points.append((geom.end[0], geom.end[1], z))
         elif geom.type == 'arc':
-            # Generate points along arc
+            # Generate points along arc with high resolution
             points.extend(self._interpolate_arc(geom, z))
         
         return points
@@ -548,14 +548,14 @@ class ToolpathGenerator:
         
         return points
     
-    def _interpolate_arc(self, arc: Geometry, z: float, 
-                        segments_per_mm: float = 0.1) -> List[Tuple[float, float, float]]:
-        """Interpolate points along an arc"""
+    def _interpolate_arc(self, arc: Geometry, z: float) -> List[Tuple[float, float, float]]:
+        """Interpolate points along an arc with high resolution"""
         points = []
         
         # Calculate number of segments based on arc length
         arc_length = self._get_segment_length(arc)
-        num_segments = max(3, int(arc_length * segments_per_mm))
+        # Use 2 segments per mm for high resolution (0.5mm between points)
+        num_segments = max(8, int(arc_length * 2))
         
         # Generate points
         start_angle_rad = np.radians(arc.start_angle)
