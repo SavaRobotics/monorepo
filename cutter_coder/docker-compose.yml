@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  cutter-coder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cutter-coder:latest
+    container_name: cutter-coder
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount temp directory for file processing
+      - ./temp:/tmp/cutter_coder
+      # Mount sample files for testing
+      - ./tests/sample_files:/app/samples:ro
+    environment:
+      - LOG_LEVEL=INFO
+      - MAX_FILE_SIZE=52428800  # 50MB
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
