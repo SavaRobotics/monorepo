@@ -1,0 +1,97 @@
+# Default PyCAM flow configuration for DXF processing
+# This template can be customized for different materials and operations
+
+models:
+  - name: "input_model"
+    source:
+      type: "file"
+      location: "input.dxf"
+    transformations:
+      - action: "scale"
+        scale_x: 1.0
+        scale_y: 1.0
+        scale_z: 1.0
+
+tools:
+  - name: "router_bit_6mm"
+    shape:
+      type: "cylindrical"
+      radius: 3.175  # 6.35mm diameter / 2
+      height: 25.0
+    id: 1
+    
+  - name: "router_bit_3mm"
+    shape:
+      type: "cylindrical" 
+      radius: 1.5    # 3mm diameter / 2
+      height: 20.0
+    id: 2
+
+processes:
+  - name: "contour_outside"
+    strategy:
+      type: "contour-follow"
+    parameters:
+      material_allowance: 0.0
+      step_down: 3.0
+      milling_style: "climb"
+      pocketing_type: "none"
+      
+  - name: "pocket_inside"
+    strategy:
+      type: "surface"
+    parameters:
+      overlap: 0.5
+      step_down: 2.0
+      material_allowance: 0.0
+      milling_style: "climb"
+
+bounds:
+  - name: "stock_bounds"
+    type: "stock"
+    specification:
+      lower:
+        x: 0
+        y: 0 
+        z: -12.0  # Material thickness
+      upper:
+        x: 1000   # Sheet width
+        y: 500    # Sheet height
+        z: 0
+
+tasks:
+  - name: "cut_outside_contours"
+    type: "milling"
+    tool: "router_bit_6mm"
+    process: "contour_outside"
+    bounds: "stock_bounds"
+    enabled: true
+    
+  - name: "cut_pockets"
+    type: "milling"
+    tool: "router_bit_3mm"
+    process: "pocket_inside" 
+    bounds: "stock_bounds"
+    enabled: true
+
+toolpaths:
+  - name: "all_toolpaths"
+    tasks: ["cut_outside_contours", "cut_pockets"]
+
+exports:
+  - name: "gcode_export"
+    source:
+      toolpaths: ["all_toolpaths"]
+    target:
+      type: "file"
+      location: "output.gcode"
+    items:
+      - type: "toolpath"
+        configuration:
+          safety_height: 5.0
+          spindle_speed: 18000
+          feedrate: 1000.0
+          plunge_feedrate: 300.0
+          unit: "mm"
+          start_stop_spindle: true
+          touch_off_on_tool_change: false
