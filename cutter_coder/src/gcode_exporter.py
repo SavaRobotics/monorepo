@@ -3,7 +3,7 @@ from datetime import datetime
 import logging
 
 from .config import CuttingConfig
-from .toolpath_generator import Toolpath
+from .toolpath_generator import Toolpath, ToolpathMove
 
 logger = logging.getLogger(__name__)
 
@@ -107,42 +107,40 @@ class GCodeExporter:
             f.write(line + '\n')
     
     def _get_toolpath_lines(self, toolpath: Toolpath, index: int) -> List[str]:
-        """Generate toolpath lines"""
+        """Generate toolpath lines with arc support"""
         lines = []
         
         # Toolpath comment
         lines.append(f"")
         lines.append(f"% Toolpath {index + 1}: {toolpath.type}")
         
-        last_z = None
         last_feed = None
-        rapid_height = self.config.safety_height
         
-        for i, (x, y, z) in enumerate(toolpath.points):
-            if i == 0:
-                # First move - rapid to XY at safe height
+        for move in toolpath.moves:
+            if move.type == 'rapid':
+                # Rapid move
+                if move.end[2] != move.start[2]:
+                    # Z movement
+                    lines.append(self._format_line(f"G0 Z{move.end[2]:.3f}"))
                 lines.append(self._format_line(
-                    f"G0 X{x:.3f} Y{y:.3f}",
-                    "Rapid to start position"
+                    f"G0 X{move.end[0]:.3f} Y{move.end[1]:.3f}",
+                    "Rapid position"
                 ))
-            else:
-                # Determine move type
-                if z > last_z and z >= rapid_height * 0.9:
-                    # Rapid move (retract)
-                    lines.append(self._format_line(f"G0 Z{z:.3f}"))
-                    if x != toolpath.points[i-1][0] or y != toolpath.points[i-1][1]:
-                        lines.append(self._format_line(f"G0 X{x:.3f} Y{y:.3f}"))
-                elif z < last_z:
-                    # Plunge move
+                
+            elif move.type == 'line':
+                # Linear move
+                # Check if it's a plunge
+                if move.end[0] == move.start[0] and move.end[1] == move.start[1]:
+                    # Pure Z move (plunge)
                     if last_feed != toolpath.plunge_rate:
                         lines.append(self._format_line(
                             f"F{toolpath.plunge_rate:.0f}",
                             "Set plunge rate"
                         ))
                         last_feed = toolpath.plunge_rate
-                    lines.append(self._format_line(f"G1 Z{z:.3f}"))
+                    lines.append(self._format_line(f"G1 Z{move.end[2]:.3f}"))
                 else:
-                    # Cutting move
+                    # XY move
                     if last_feed != toolpath.feed_rate:
                         lines.append(self._format_line(
                             f"F{toolpath.feed_rate:.0f}",
@@ -150,24 +148,35 @@ class GCodeExporter:
                         ))
                         last_feed = toolpath.feed_rate
                     
-                    # Determine if we need Z movement
-                    if z != last_z:
+                    if move.end[2] != move.start[2]:
                         lines.append(self._format_line(
-                            f"G1 X{x:.3f} Y{y:.3f} Z{z:.3f}"
+                            f"G1 X{move.end[0]:.3f} Y{move.end[1]:.3f} Z{move.end[2]:.3f}"
                         ))
                     else:
                         lines.append(self._format_line(
-                            f"G1 X{x:.3f} Y{y:.3f}"
+                            f"G1 X{move.end[0]:.3f} Y{move.end[1]:.3f}"
                         ))
-            
-            last_z = z
-        
-        # Retract at end of toolpath
-        if last_z and last_z < rapid_height:
-            lines.append(self._format_line(
-                f"G0 Z{rapid_height:.3f}",
-                "Retract to safety height"
-            ))
+                        
+            elif move.type == 'arc':
+                # Arc move
+                if last_feed != toolpath.feed_rate:
+                    lines.append(self._format_line(
+                        f"F{toolpath.feed_rate:.0f}",
+                        "Set feed rate"
+                    ))
+                    last_feed = toolpath.feed_rate
+                
+                # Calculate I and J (center relative to start)
+                i = move.center[0] - move.start[0]
+                j = move.center[1] - move.start[1]
+                
+                # Use G2 for clockwise, G3 for counter-clockwise
+                g_code = "G2" if move.clockwise else "G3"
+                
+                lines.append(self._format_line(
+                    f"{g_code} X{move.end[0]:.3f} Y{move.end[1]:.3f} I{i:.3f} J{j:.3f}",
+                    "Arc"
+                ))
         
         return lines
     

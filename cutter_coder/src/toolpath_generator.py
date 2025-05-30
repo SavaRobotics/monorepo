@@ -9,10 +9,19 @@ from .dxf_processor import Part, Geometry
 logger = logging.getLogger(__name__)
 
 @dataclass
+class ToolpathMove:
+    """Represents a single move in a toolpath"""
+    type: str  # 'rapid', 'line', 'arc'
+    start: Tuple[float, float, float]
+    end: Tuple[float, float, float]
+    center: Optional[Tuple[float, float]] = None  # For arcs
+    clockwise: bool = True  # For arcs
+
+@dataclass
 class Toolpath:
     """Represents a complete toolpath"""
     type: str  # 'contour', 'pocket', 'drill'
-    points: List[Tuple[float, float, float]]  # (x, y, z) coordinates
+    moves: List[ToolpathMove]  # List of moves instead of points
     feed_rate: float
     plunge_rate: float
     tool_number: int = 1
@@ -44,7 +53,7 @@ class ToolpathGenerator:
                 self.toolpaths.append(hole_path)
         
         # Optimize toolpath order to minimize travel
-        self.toolpaths = self._optimize_toolpath_order(self.toolpaths)
+        # self.toolpaths = self._optimize_toolpath_order(self.toolpaths)
         
         return self.toolpaths
     
@@ -58,13 +67,19 @@ class ToolpathGenerator:
         # Determine tab positions
         tabs = self._calculate_tab_positions(contour, total_length)
         
-        # Generate toolpath points
-        points = []
+        # Generate toolpath moves
+        moves = []
         current_z = self.config.safety_height
         
         # Move to start position
         start_point = contour[0].start
-        points.append((start_point[0], start_point[1], current_z))
+        
+        # Initial rapid to start position
+        moves.append(ToolpathMove(
+            type='rapid',
+            start=(0, 0, current_z),
+            end=(start_point[0], start_point[1], current_z)
+        ))
         
         # Multiple passes for step-down
         current_depth = 0
@@ -73,27 +88,34 @@ class ToolpathGenerator:
                               self.config.material.thickness)
             
             # Plunge to depth
-            points.append((start_point[0], start_point[1], -current_depth))
+            moves.append(ToolpathMove(
+                type='line',
+                start=(start_point[0], start_point[1], moves[-1].end[2]),
+                end=(start_point[0], start_point[1], -current_depth)
+            ))
             
             # Cut contour with tabs
-            points.extend(self._cut_contour_with_tabs(contour, tabs, -current_depth))
-            
-            # Return to start for closed contour
-            points.append((start_point[0], start_point[1], -current_depth))
+            contour_moves = self._generate_contour_moves(contour, tabs, -current_depth)
+            moves.extend(contour_moves)
         
         # Retract to safety height
-        points.append((start_point[0], start_point[1], self.config.safety_height))
+        last_pos = moves[-1].end
+        moves.append(ToolpathMove(
+            type='rapid',
+            start=last_pos,
+            end=(last_pos[0], last_pos[1], self.config.safety_height)
+        ))
         
         return Toolpath(
             type='contour',
-            points=points,
+            moves=moves,
             feed_rate=self.config.material.feed_rate,
             plunge_rate=self.config.material.plunge_rate
         )
     
     def _generate_hole_toolpath(self, hole: List[Geometry]) -> Toolpath:
         """Generate toolpath for a hole (no tabs)"""
-        points = []
+        moves = []
         
         # Find hole center and radius
         bbox = self._calculate_bbox(hole)
@@ -104,19 +126,70 @@ class ToolpathGenerator:
         # If hole is small enough, use drilling cycle
         if radius <= self.config.tool.diameter / 2:
             # Simple drilling
-            points.append((center_x, center_y, self.config.safety_height))
-            points.append((center_x, center_y, -self.config.material.thickness))
-            points.append((center_x, center_y, self.config.safety_height))
+            moves.append(ToolpathMove(
+                type='rapid',
+                start=(0, 0, self.config.safety_height),
+                end=(center_x, center_y, self.config.safety_height)
+            ))
+            moves.append(ToolpathMove(
+                type='line',
+                start=(center_x, center_y, self.config.safety_height),
+                end=(center_x, center_y, -self.config.material.thickness)
+            ))
+            moves.append(ToolpathMove(
+                type='rapid',
+                start=(center_x, center_y, -self.config.material.thickness),
+                end=(center_x, center_y, self.config.safety_height)
+            ))
             
             return Toolpath(
                 type='drill',
-                points=points,
+                moves=moves,
                 feed_rate=self.config.material.plunge_rate,
                 plunge_rate=self.config.material.plunge_rate
             )
         else:
-            # Helical or contour milling for larger holes
-            return self._generate_pocket_toolpath(hole)
+            # For larger holes, cut the contour
+            start_point = hole[0].start
+            
+            # Rapid to start
+            moves.append(ToolpathMove(
+                type='rapid',
+                start=(0, 0, self.config.safety_height),
+                end=(start_point[0], start_point[1], self.config.safety_height)
+            ))
+            
+            # Multiple passes for step-down
+            current_depth = 0
+            while current_depth < self.config.material.thickness:
+                current_depth = min(current_depth + self.config.material.step_down, 
+                                  self.config.material.thickness)
+                
+                # Plunge
+                moves.append(ToolpathMove(
+                    type='line',
+                    start=(start_point[0], start_point[1], moves[-1].end[2]),
+                    end=(start_point[0], start_point[1], -current_depth)
+                ))
+                
+                # Cut hole contour
+                hole_moves = self._generate_contour_moves(hole, [], -current_depth)
+                moves.extend(hole_moves)
+            
+            # Retract
+            last_pos = moves[-1].end
+            moves.append(ToolpathMove(
+                type='rapid',
+                start=last_pos,
+                end=(last_pos[0], last_pos[1], self.config.safety_height)
+            ))
+            
+            return Toolpath(
+                type='pocket',
+                moves=moves,
+                feed_rate=self.config.material.feed_rate,
+                plunge_rate=self.config.material.plunge_rate
+            )
     
     def _calculate_contour_length(self, contour: List[Geometry]) -> float:
         """Calculate total length of a contour"""
@@ -420,6 +493,64 @@ class ToolpathGenerator:
             
         # Default fallback
         return geom.start, geom.start
+    
+    def _generate_contour_moves(self, contour: List[Geometry], tabs: List[Tab], 
+                               z_depth: float) -> List[ToolpathMove]:
+        """Generate moves for contour with proper arc handling"""
+        moves = []
+        current_pos = None
+        
+        for i, geom in enumerate(contour):
+            if geom.type == 'line':
+                # Simple line move
+                move = ToolpathMove(
+                    type='line',
+                    start=(geom.start[0], geom.start[1], z_depth),
+                    end=(geom.end[0], geom.end[1], z_depth)
+                )
+                moves.append(move)
+                current_pos = move.end
+                
+            elif geom.type == 'arc':
+                # Arc move with center point
+                # Determine if clockwise or counter-clockwise
+                # Cross product of start->center and start->end vectors
+                start_to_center = (geom.center[0] - geom.start[0], geom.center[1] - geom.start[1])
+                start_to_end = (geom.end[0] - geom.start[0], geom.end[1] - geom.start[1])
+                cross = start_to_center[0] * start_to_end[1] - start_to_center[1] * start_to_end[0]
+                
+                # Calculate angle span
+                start_angle = np.degrees(np.arctan2(geom.start[1] - geom.center[1], 
+                                                   geom.start[0] - geom.center[0]))
+                end_angle = np.degrees(np.arctan2(geom.end[1] - geom.center[1], 
+                                                 geom.end[0] - geom.center[0]))
+                
+                # Normalize angles
+                if start_angle < 0:
+                    start_angle += 360
+                if end_angle < 0:
+                    end_angle += 360
+                
+                # Determine direction based on the original arc's angle progression
+                angle_diff = geom.end_angle - geom.start_angle
+                if angle_diff < 0:
+                    angle_diff += 360
+                
+                clockwise = angle_diff > 180
+                
+                move = ToolpathMove(
+                    type='arc',
+                    start=(geom.start[0], geom.start[1], z_depth),
+                    end=(geom.end[0], geom.end[1], z_depth),
+                    center=(geom.center[0], geom.center[1]),
+                    clockwise=clockwise
+                )
+                moves.append(move)
+                current_pos = move.end
+        
+        # TODO: Handle tabs by breaking moves at tab locations
+        
+        return moves
     
     def _cut_contour_with_tabs(self, contour: List[Geometry], tabs: List[Tab], 
                               z_depth: float) -> List[Tuple[float, float, float]]:
