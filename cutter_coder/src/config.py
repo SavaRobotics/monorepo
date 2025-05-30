@@ -26,7 +26,7 @@ class TabConfig(BaseModel):
 
 class ToolConfig(BaseModel):
     type: ToolType = ToolType.END_MILL
-    diameter: float = Field(6.35, description="Tool diameter in mm")
+    diameter: float = Field(3.175, description="Tool diameter in mm")  # 1/8 inch
     flute_length: float = Field(25.0, description="Cutting flute length in mm")
     total_length: float = Field(50.0, description="Total tool length in mm")
     flutes: int = Field(2, description="Number of flutes")

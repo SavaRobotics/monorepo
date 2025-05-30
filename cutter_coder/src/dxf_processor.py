@@ -52,7 +52,45 @@ class DXFProcessor:
             geometries = self._entities_to_geometries(entities)
             
             # Find connected contours and identify parts
-            self.parts = self._find_parts(geometries)
+            all_parts = self._find_parts(geometries)
+            
+            # Filter out sheet boundary if it exists
+            self.parts = []
+            
+            # First, identify the largest part (likely the sheet)
+            if len(all_parts) > 1:
+                # Calculate areas of all parts
+                part_areas = []
+                for i, part in enumerate(all_parts):
+                    width = part.bounding_box[2] - part.bounding_box[0]
+                    height = part.bounding_box[3] - part.bounding_box[1]
+                    area = width * height
+                    part_areas.append((i, area, part))
+                
+                # Sort by area (largest first)
+                part_areas.sort(key=lambda x: x[1], reverse=True)
+                
+                # If the largest part is significantly bigger than the second largest, it's likely the sheet
+                if len(part_areas) >= 2:
+                    largest_area = part_areas[0][1]
+                    second_largest_area = part_areas[1][1]
+                    
+                    # If largest is more than 10x bigger than second largest, it's probably the sheet
+                    if largest_area > second_largest_area * 10:
+                        sheet_part = part_areas[0][2]
+                        bbox = sheet_part.bounding_box
+                        logger.info(f"Filtered out sheet boundary (largest part): {bbox[2]-bbox[0]:.1f}x{bbox[3]-bbox[1]:.1f}mm, area={largest_area:.0f}mm²")
+                        
+                        # Add all parts except the sheet
+                        for idx, area, part in part_areas[1:]:
+                            self.parts.append(part)
+                    else:
+                        # No clear sheet boundary, keep all parts
+                        self.parts = all_parts
+                else:
+                    self.parts = all_parts
+            else:
+                self.parts = all_parts
             
             logger.info(f"Loaded DXF with {len(self.parts)} parts")
             

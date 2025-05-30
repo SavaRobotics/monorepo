@@ -52,7 +52,13 @@ class ToolpathGenerator:
         """Generate toolpaths for all parts"""
         self.toolpaths = []
         
-        for part in parts:
+        for i, part in enumerate(parts):
+            # Log part info
+            bbox = part.bounding_box
+            width = bbox[2] - bbox[0]
+            height = bbox[3] - bbox[1]
+            logger.info(f"Processing part {i}: {width:.1f} x {height:.1f} mm")
+            
             # Generate outer contour toolpath with tabs
             contour_path = self._generate_contour_with_tabs(part)
             self.toolpaths.append(contour_path)
@@ -82,8 +88,33 @@ class ToolpathGenerator:
                 offset_contours = self.offset_processor.offset_contour(contour, -tool_radius)
                 if offset_contours:
                     logger.info(f"Applied tool offset of {-tool_radius}mm to outer contour")
-                    # Use the first offset contour (should typically be only one for outer contours)
-                    contour = offset_contours[0]
+                    logger.info(f"  Original contour: {len(contour)} segments")
+                    logger.info(f"  Offset resulted in {len(offset_contours)} contour(s)")
+                    
+                    # Filter out tiny contours that may be artifacts
+                    valid_contours = []
+                    for i, offset_contour in enumerate(offset_contours):
+                        bbox = self._calculate_bbox(offset_contour)
+                        width = bbox[2] - bbox[0]
+                        height = bbox[3] - bbox[1]
+                        area = width * height
+                        
+                        # Skip contours smaller than 1mm x 1mm or area less than 10 mm²
+                        if width < 1 or height < 1 or area < 10:
+                            logger.warning(f"  Skipping tiny offset contour {i}: {width:.3f} x {height:.3f} mm (area={area:.3f} mm²)")
+                        else:
+                            logger.info(f"  Valid offset contour {i}: {width:.3f} x {height:.3f} mm")
+                            valid_contours.append(offset_contour)
+                    
+                    if valid_contours:
+                        # Use the largest valid contour
+                        contour = max(valid_contours, key=lambda c: (
+                            (self._calculate_bbox(c)[2] - self._calculate_bbox(c)[0]) * 
+                            (self._calculate_bbox(c)[3] - self._calculate_bbox(c)[1])
+                        ))
+                        logger.info(f"  Using largest valid offset contour with {len(contour)} segments")
+                    else:
+                        logger.warning("  No valid offset contours found, using original")
                 else:
                     logger.warning("Tool offset resulted in no valid contour, using original")
             except Exception as e:
