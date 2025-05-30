@@ -1,23 +1,125 @@
-"""MCP server for DXF part nesting functionality."""
+#!/usr/bin/env python3
+"""Simple MCP server for DXF part nesting functionality without fastmcp."""
 
 import os
+import sys
 import json
-import tempfile
 import asyncio
+import tempfile
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Dict, List, Any
 import httpx
-from fastmcp import FastMCP
 from datetime import datetime
 
-# Import the nesting functionality
-from .nest import DXFNester
+# Add current directory to Python path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
 
-# Create MCP server instance
-mcp = FastMCP(
-    name="nesting",
-    description="DXF part nesting service for arranging parts on sheets"
-)
+# Import the nesting functionality
+from nest import DXFNester
+
+async def handle_mcp_request(request: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle MCP protocol requests."""
+    method = request.get("method")
+    params = request.get("params", {})
+    
+    if method == "initialize":
+        return {
+            "jsonrpc": "2.0",
+            "id": request.get("id"),
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": {}
+                },
+                "serverInfo": {
+                    "name": "nesting",
+                    "version": "1.0.0"
+                }
+            }
+        }
+    
+    elif method == "tools/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": request.get("id"),
+            "result": {
+                "tools": [
+                    {
+                        "name": "nest_parts",
+                        "description": "Nest DXF parts on a sheet. Accepts a list of DXF URLs and arranges them efficiently.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "dxf_urls": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "List of URLs to DXF files. Duplicate URLs represent multiple quantities."
+                                },
+                                "sheet_width": {
+                                    "type": "number",
+                                    "description": "Width of the sheet in mm (default: 1000)",
+                                    "default": 1000.0
+                                },
+                                "sheet_height": {
+                                    "type": "number", 
+                                    "description": "Height of the sheet in mm (default: 500)",
+                                    "default": 500.0
+                                },
+                                "spacing": {
+                                    "type": "number",
+                                    "description": "Minimum spacing between parts in mm (default: 2)",
+                                    "default": 2.0
+                                }
+                            },
+                            "required": ["dxf_urls"]
+                        }
+                    },
+                    {
+                        "name": "get_nesting_status",
+                        "description": "Get the current status of the nesting service",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {}
+                        }
+                    }
+                ]
+            }
+        }
+    
+    elif method == "tools/call":
+        tool_name = params.get("name")
+        arguments = params.get("arguments", {})
+        
+        if tool_name == "nest_parts":
+            result = await nest_parts(**arguments)
+        elif tool_name == "get_nesting_status":
+            result = await get_nesting_status(**arguments)
+        else:
+            result = {"error": f"Unknown tool: {tool_name}"}
+        
+        return {
+            "jsonrpc": "2.0",
+            "id": request.get("id"),
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": json.dumps(result)
+                    }
+                ]
+            }
+        }
+    
+    else:
+        return {
+            "jsonrpc": "2.0",
+            "id": request.get("id"),
+            "error": {
+                "code": -32601,
+                "message": f"Method not found: {method}"
+            }
+        }
 
 # Global state for tracking nesting operations
 nesting_status = {
@@ -25,33 +127,13 @@ nesting_status = {
     "message": "Ready"
 }
 
-@mcp.tool(
-    description="Nest DXF parts on a sheet. Accepts a list of DXF URLs and arranges them efficiently."
-)
 async def nest_parts(
     dxf_urls: List[str],
-    sheet_width: Optional[float] = 1000.0,
-    sheet_height: Optional[float] = 500.0,
-    spacing: Optional[float] = 2.0
+    sheet_width: float = 1000.0,
+    sheet_height: float = 500.0,
+    spacing: float = 2.0
 ) -> Dict:
-    """
-    Nest DXF parts on a sheet.
-    
-    Args:
-        dxf_urls: List of URLs to DXF files. Duplicate URLs represent multiple quantities.
-        sheet_width: Width of the sheet in mm (default: 1000)
-        sheet_height: Height of the sheet in mm (default: 500)
-        spacing: Minimum spacing between parts in mm (default: 2)
-        
-    Returns:
-        Dictionary containing:
-        - utilization_percent: Sheet utilization percentage
-        - placed_count: Number of parts successfully placed
-        - total_parts: Total number of parts attempted
-        - unfittable_parts: List of URLs that couldn't be placed
-        - nested_dxf_path: Path to the generated nested DXF file
-        - message: Status message
-    """
+    """Nest DXF parts on a sheet."""
     global nesting_status
     
     if nesting_status["is_running"]:
@@ -68,21 +150,18 @@ async def nest_parts(
         with tempfile.TemporaryDirectory() as temp_dir:
             # Download all DXF files
             downloaded_files = []
-            url_to_file_map = {}  # Map URLs to local files for tracking unfittable parts
+            url_to_file_map = {}
             
             async with httpx.AsyncClient(timeout=30.0) as client:
                 for i, url in enumerate(dxf_urls):
                     nesting_status["message"] = f"Downloading file {i+1}/{len(dxf_urls)}..."
                     
                     try:
-                        # Generate unique filename for each instance
                         filename = f"part_{i}_{Path(url).name}"
                         if not filename.endswith('.dxf'):
                             filename += '.dxf'
                         
                         filepath = os.path.join(temp_dir, filename)
-                        
-                        # Download the file
                         response = await client.get(url)
                         response.raise_for_status()
                         
@@ -93,7 +172,7 @@ async def nest_parts(
                         url_to_file_map[filepath] = url
                         
                     except Exception as e:
-                        print(f"Error downloading {url}: {e}")
+                        print(f"Error downloading {url}: {e}", file=sys.stderr)
                         continue
             
             if not downloaded_files:
@@ -110,9 +189,12 @@ async def nest_parts(
             nester = DXFNester(sheet_width, sheet_height, spacing)
             
             # Set output directory environment variable
-            output_dir = tempfile.mkdtemp()
+            output_dir = os.environ.get('OUTPUT_DIR', tempfile.mkdtemp())
             os.environ['OUTPUT_DIR'] = output_dir
             os.environ['OUTPUT_NAME'] = 'nested_layout'
+            
+            # Create output directory if it doesn't exist
+            os.makedirs(output_dir, exist_ok=True)
             
             # Run nesting
             result = nester.nest_parts(downloaded_files)
@@ -133,13 +215,6 @@ async def nest_parts(
                 "message": result['message']
             }
             
-            # Save results JSON
-            results_path = os.path.join(output_dir, 'nesting_results.json')
-            with open(results_path, 'w') as f:
-                json.dump(response, f, indent=2)
-            
-            response['results_json_path'] = results_path
-            
             return response
             
     except Exception as e:
@@ -155,152 +230,39 @@ async def nest_parts(
         nesting_status["is_running"] = False
         nesting_status["message"] = "Ready"
 
-@mcp.tool(
-    description="Get the current status of the nesting service"
-)
 async def get_nesting_status() -> Dict:
-    """
-    Check if a nesting operation is currently running.
-    
-    Returns:
-        Dictionary containing:
-        - is_running: Boolean indicating if nesting is in progress
-        - message: Current status message
-    """
+    """Check if a nesting operation is currently running."""
     return nesting_status
 
-@mcp.tool(
-    description="Upload nested DXF result to a URL endpoint"
-)
-async def upload_nested_result(
-    nested_dxf_path: str,
-    upload_url: str,
-    method: Optional[str] = "PUT"
-) -> Dict:
-    """
-    Upload the nested DXF file to a specified URL.
-    
-    Args:
-        nested_dxf_path: Path to the nested DXF file
-        upload_url: URL to upload the file to
-        method: HTTP method to use (PUT or POST)
-        
-    Returns:
-        Dictionary containing upload status
-    """
-    try:
-        if not os.path.exists(nested_dxf_path):
-            return {"error": "Nested DXF file not found", "success": False}
-        
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            with open(nested_dxf_path, 'rb') as f:
-                content = f.read()
+async def main():
+    """Main MCP server loop."""
+    while True:
+        try:
+            # Read JSON-RPC request from stdin
+            line = sys.stdin.readline()
+            if not line:
+                break
+                
+            request = json.loads(line.strip())
+            response = await handle_mcp_request(request)
             
-            headers = {
-                'Content-Type': 'application/dxf',
-                'Content-Length': str(len(content))
+            # Write JSON-RPC response to stdout
+            print(json.dumps(response), flush=True)
+            
+        except json.JSONDecodeError:
+            # Invalid JSON, ignore
+            continue
+        except Exception as e:
+            # Send error response
+            error_response = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {
+                    "code": -32603,
+                    "message": f"Internal error: {str(e)}"
+                }
             }
-            
-            if method.upper() == "PUT":
-                response = await client.put(upload_url, content=content, headers=headers)
-            else:
-                files = {'file': ('nested_layout.dxf', content, 'application/dxf')}
-                response = await client.post(upload_url, files=files)
-            
-            response.raise_for_status()
-            
-            return {
-                "success": True,
-                "status_code": response.status_code,
-                "message": "File uploaded successfully",
-                "upload_url": upload_url
-            }
-            
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "message": f"Upload failed: {str(e)}"
-        }
-
-@mcp.tool(
-    description="Upload nested DXF file to Supabase storage bucket"
-)
-async def upload_to_supabase(
-    nested_dxf_path: str,
-    supabase_url: str,
-    supabase_key: str,
-    bucket_name: Optional[str] = "dxffiles",
-    folder_path: Optional[str] = "nested"
-) -> Dict:
-    """
-    Upload the nested DXF file to Supabase storage.
-    
-    Args:
-        nested_dxf_path: Path to the nested DXF file
-        supabase_url: Supabase project URL
-        supabase_key: Supabase API key (service role key for uploads)
-        bucket_name: Storage bucket name (default: "dxffiles")
-        folder_path: Folder path within the bucket (default: "nested")
-        
-    Returns:
-        Dictionary containing:
-        - success: Boolean indicating if upload succeeded
-        - public_url: Public URL of the uploaded file
-        - path: Storage path of the file
-        - message: Status message
-    """
-    try:
-        # Lazy import to avoid dependency issues if not using this tool
-        from supabase import create_client
-        
-        if not os.path.exists(nested_dxf_path):
-            return {
-                "success": False,
-                "error": "Nested DXF file not found",
-                "message": f"File not found at: {nested_dxf_path}"
-            }
-        
-        # Initialize Supabase client
-        supabase = create_client(supabase_url, supabase_key)
-        
-        # Generate unique filename with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"nested_layout_{timestamp}.dxf"
-        storage_path = f"{folder_path}/{filename}" if folder_path else filename
-        
-        # Read the file
-        with open(nested_dxf_path, 'rb') as f:
-            file_content = f.read()
-        
-        # Upload to Supabase storage
-        response = supabase.storage.from_(bucket_name).upload(
-            path=storage_path,
-            file=file_content,
-            file_options={"content-type": "application/dxf"}
-        )
-        
-        # Get public URL
-        public_url = supabase.storage.from_(bucket_name).get_public_url(storage_path)
-        
-        return {
-            "success": True,
-            "public_url": public_url,
-            "path": storage_path,
-            "bucket": bucket_name,
-            "filename": filename,
-            "file_size": len(file_content),
-            "message": f"Successfully uploaded to Supabase storage: {storage_path}"
-        }
-        
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "message": f"Supabase upload failed: {str(e)}"
-        }
+            print(json.dumps(error_response), flush=True)
 
 if __name__ == "__main__":
-    # Run the MCP server
-    import uvicorn
-    uvicorn.run(mcp.app, host="0.0.0.0", port=8002)
+    asyncio.run(main())

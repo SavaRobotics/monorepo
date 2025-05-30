@@ -23,12 +23,14 @@ RUN pip install --no-cache-dir -r python-requirements.txt
 
 # Copy Node.js package files and install dependencies
 COPY package.json tsconfig.json ./
+COPY tailwind.config.js postcss.config.js next.config.js ./
 RUN npm install
 
 # Copy all source code
 COPY src/ ./src/
+COPY app/ ./app/
 
-# Compile TypeScript
+# Build Next.js and compile TypeScript
 RUN npm run build
 
 # Verify both Python and Node.js MCP servers are available
@@ -38,6 +40,9 @@ RUN npx @supabase/mcp-server-postgrest --version 2>/dev/null || echo "✅ Supaba
 # Set environment variables
 ENV PYTHONPATH="/app/src"
 ENV NODE_ENV="production"
+
+# Expose port 3000 for Next.js
+EXPOSE 3000
 
 # Run the main application
 CMD ["npm", "run", "start"]

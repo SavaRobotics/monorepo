@@ -1,9 +1,14 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { MCPServerConfig, MCPServerInstance, MCPManager } from './types.js';
+import { MCPServerConfig, MCPServerInstance, MCPManager } from './types';
 
 export class MCPServerManager implements MCPManager {
   public servers: Map<string, MCPServerInstance> = new Map();
+
+  // Get running servers for health checks
+  public getRunningServers(): Map<string, MCPServerInstance> {
+    return new Map(this.servers);
+  }
 
   async startServer(config: MCPServerConfig): Promise<MCPServerInstance> {
     console.log(`🚀 Starting MCP server: ${config.name}`);

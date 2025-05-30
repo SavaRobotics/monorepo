@@ -2,6 +2,8 @@ services:
   brain:
     build: .
     container_name: brain
+    ports:
+      - "3000:3000"
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - SUPABASE_URL=${SUPABASE_URL}

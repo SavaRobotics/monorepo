@@ -1,4 +1,4 @@
-import { MCPServerConfig } from '../types.js';
+import { MCPServerConfig } from '../types';
 
 export const supabaseMCP: MCPServerConfig = {
   name: 'supabase',
