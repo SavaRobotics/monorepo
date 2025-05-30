@@ -1,158 +1,323 @@
-"""Main processing module for DXF to G-code conversion"""
-
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+import os
+import tempfile
+import shutil
+from datetime import datetime
+from typing import Optional
 import logging
-from typing import Dict, List, Optional
-from pathlib import Path
 
-from .core.dxf_parser import DXFParser
-from .materials.database import get_material_settings
-from .operations.boring import BoringOperation
-from .operations.slotting import SlottingOperation
-from .operations.contouring import ContouringOperation
-from .operations.tab_generator import TabGenerator
-from .postprocessors.mach3 import Mach3PostProcessor
+from .config import (
+    app_config, 
+    ConversionRequest, 
+    MaterialConfig, 
+    ToolConfig, 
+    TabConfig,
+    CuttingConfig,
+    DXFProcessingConfig
+)
+from .dxf_processor import DXFProcessor
+from .toolpath_generator import ToolpathGenerator
+from .gcode_exporter import GCodeExporter
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-class DXFToGCodeProcessor:
-    def __init__(self, material: str = "aluminum", tool_diameter: float = 6.35):
-        self.material = material
-        self.tool_diameter = tool_diameter
-        self.material_settings = get_material_settings(material)
+# Create FastAPI app
+app = FastAPI(
+    title=app_config.app_name,
+    version=app_config.version,
+    description="Convert nested DXF files to G-code for CNC routing"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Ensure temp directory exists
+os.makedirs(app_config.temp_dir, exist_ok=True)
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "name": app_config.app_name,
+        "version": app_config.version,
+        "endpoints": {
+            "convert": "/convert",
+            "validate": "/validate",
+            "materials": "/materials",
+            "health": "/health"
+        }
+    }
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+@app.get("/materials")
+async def get_materials():
+    """Get available material presets"""
+    return {
+        "presets": app_config.material_presets,
+        "material_types": ["plywood", "mdf", "aluminum", "acrylic", "steel", "custom"]
+    }
+
+@app.post("/validate")
+async def validate_dxf(file: UploadFile = File(...)):
+    """Validate a DXF file"""
+    if not file.filename.lower().endswith('.dxf'):
+        raise HTTPException(status_code=400, detail="File must be a DXF file")
+    
+    # Save uploaded file temporarily
+    temp_path = os.path.join(app_config.temp_dir, f"validate_{file.filename}")
+    
+    try:
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
         
-        # Initialize operations
-        self.boring_op = BoringOperation(self.material_settings)
-        self.slotting_op = SlottingOperation(self.material_settings)
-        self.contouring_op = ContouringOperation(self.material_settings)
-        self.tab_generator = TabGenerator(self.material_settings)
-        
-        # Post processor
-        self.post_processor = Mach3PostProcessor(material, tool_diameter)
-        
-    def process_dxf(self, dxf_path: str, material_thickness: float,
-                   enable_tabs: bool = True) -> Dict:
-        """Process DXF file and generate G-code"""
-        logger.info(f"Processing DXF: {dxf_path}")
-        
-        # Parse DXF
-        parser = DXFParser(dxf_path)
-        parsed_data = parser.parse()
-        
-        logger.info(f"Found {len(parsed_data['parts'])} parts")
-        
-        # Process all operations in order
-        all_toolpaths = []
-        
-        # 1. Process internal features first (boring operations)
-        for part in parsed_data['parts']:
-            if part.get('holes'):
-                logger.info(f"Processing {len(part['holes'])} holes")
-                for hole in part['holes']:
-                    if hole['type'] == 'circle':
-                        toolpath = self.boring_op.generate_toolpath(
-                            hole['center'],
-                            hole['radius'],
-                            material_thickness
-                        )
-                        all_toolpaths.extend(toolpath)
-        
-        # 2. Process slots (if any elongated holes)
-        # This would need additional logic to detect slots vs round holes
-        
-        # 3. Process part contours
-        for i, part in enumerate(parsed_data['parts']):
-            logger.info(f"Processing part {i+1} contour")
-            
-            # Generate tabs if enabled
-            tabs = []
-            if enable_tabs and part['contour']['type'] == 'polyline':
-                tabs = self.tab_generator.generate_tabs(
-                    part['contour']['points']
-                )
-                logger.info(f"Generated {len(tabs)} tabs")
-            
-            # Generate contour toolpath
-            if part['contour']['type'] == 'polyline':
-                toolpath = self.contouring_op.generate_toolpath(
-                    part['contour']['points'],
-                    material_thickness,
-                    tabs
-                )
-            elif part['contour']['type'] == 'circle':
-                # Convert circle to polyline
-                # This is simplified - real implementation would generate proper circle points
-                circle_points = self._circle_to_points(
-                    part['contour']['center'],
-                    part['contour']['radius']
-                )
-                toolpath = self.contouring_op.generate_toolpath(
-                    circle_points,
-                    material_thickness,
-                    tabs
-                )
-            
-            all_toolpaths.extend(toolpath)
-        
-        # Generate G-code
-        spindle_speed = self.material_settings['operations']['contouring']['spindle_speed']
-        gcode = self.post_processor.generate_gcode(
-            all_toolpaths,
-            spindle_speed=spindle_speed
-        )
-        
-        # Optimize G-code
-        optimized_gcode = self.post_processor.optimize_gcode(gcode)
+        # Process DXF
+        processor = DXFProcessor()
+        result = processor.load_dxf(temp_path, layer_filter="LargestFace")
         
         return {
-            "success": True,
-            "gcode": optimized_gcode,
-            "stats": {
-                "parts_count": len(parsed_data['parts']),
-                "total_moves": len(all_toolpaths),
-                "material": self.material,
-                "thickness": material_thickness,
-                "tool_diameter": self.tool_diameter
-            }
+            "valid": True,
+            "filename": file.filename,
+            "parts_count": result["parts_count"],
+            "sheet_boundary": result["sheet_boundary"],
+            "layers": result["layers"],
+            "total_entities": result["total_entities"]
         }
-    
-    def _circle_to_points(self, center: tuple, radius: float, 
-                         segments: int = 72) -> List[tuple]:
-        """Convert circle to polygon points"""
-        import numpy as np
-        
-        angles = np.linspace(0, 2 * np.pi, segments, endpoint=False)
-        points = []
-        
-        for angle in angles:
-            x = center[0] + radius * np.cos(angle)
-            y = center[1] + radius * np.sin(angle)
-            points.append((x, y))
-        
-        # Close the circle
-        points.append(points[0])
-        
-        return points
-
-def process_dxf_file(dxf_path: str, output_path: str,
-                    material: str = "aluminum",
-                    thickness: float = 3.0,
-                    tool_diameter: float = 6.35,
-                    enable_tabs: bool = True) -> bool:
-    """Convenience function to process a DXF file"""
-    try:
-        processor = DXFToGCodeProcessor(material, tool_diameter)
-        result = processor.process_dxf(dxf_path, thickness, enable_tabs)
-        
-        if result["success"]:
-            # Write G-code to file
-            with open(output_path, 'w') as f:
-                f.write(result["gcode"])
-            
-            logger.info(f"G-code written to: {output_path}")
-            logger.info(f"Stats: {result['stats']}")
-            return True
         
     except Exception as e:
-        logger.error(f"Error processing DXF: {e}")
-        return False
+        logger.error(f"Validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid DXF file: {str(e)}")
+    
+    finally:
+        # Cleanup
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+@app.post("/convert")
+async def convert_dxf_to_gcode(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    material_preset: Optional[str] = None,
+    material_thickness: Optional[float] = None,
+    feed_rate: Optional[float] = None,
+    spindle_speed: Optional[int] = None,
+    tool_diameter: Optional[float] = None,
+    enable_tabs: bool = True,
+    tab_height: Optional[float] = None,
+    tab_width: Optional[float] = None,
+    tab_spacing: Optional[float] = None,
+    corner_exclusion_zone: Optional[float] = None,
+    corner_angle_threshold: Optional[float] = None,
+    output_format: str = "linuxcnc"
+):
+    """Convert DXF file to G-code"""
+    
+    if not file.filename.lower().endswith('.dxf'):
+        raise HTTPException(status_code=400, detail="File must be a DXF file")
+    
+    # Generate unique filenames
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    input_filename = f"input_{timestamp}_{file.filename}"
+    output_filename = f"output_{timestamp}_{file.filename.replace('.dxf', '.gcode')}"
+    
+    input_path = os.path.join(app_config.temp_dir, input_filename)
+    output_path = os.path.join(app_config.temp_dir, output_filename)
+    
+    try:
+        # Save uploaded file
+        with open(input_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Configure material settings
+        if material_preset and material_preset in app_config.material_presets:
+            material_config = app_config.material_presets[material_preset].model_copy()
+        else:
+            material_config = MaterialConfig()
+        
+        # Override with custom values if provided
+        if material_thickness is not None:
+            material_config.thickness = material_thickness
+        if feed_rate is not None:
+            material_config.feed_rate = feed_rate
+        if spindle_speed is not None:
+            material_config.spindle_speed = spindle_speed
+        
+        # Configure tool settings
+        tool_config = ToolConfig()
+        if tool_diameter is not None:
+            tool_config.diameter = tool_diameter
+        
+        # Configure tab settings
+        tab_config = TabConfig(enabled=enable_tabs)
+        if tab_height is not None:
+            tab_config.height = tab_height
+        if tab_width is not None:
+            tab_config.width = tab_width
+        if tab_spacing is not None:
+            tab_config.spacing = tab_spacing
+        if corner_exclusion_zone is not None:
+            tab_config.corner_exclusion_zone = corner_exclusion_zone
+        if corner_angle_threshold is not None:
+            tab_config.corner_angle_threshold = corner_angle_threshold
+        
+        # Create cutting configuration
+        cutting_config = CuttingConfig(
+            material=material_config,
+            tool=tool_config,
+            tabs=tab_config
+        )
+        
+        # Process DXF
+        logger.info(f"Processing DXF file: {input_filename}")
+        processor = DXFProcessor()
+        dxf_info = processor.load_dxf(input_path, layer_filter="LargestFace")
+        
+        if not processor.parts:
+            raise HTTPException(status_code=400, detail="No parts found in DXF file")
+        
+        # Generate toolpaths
+        logger.info("Generating toolpaths")
+        toolpath_generator = ToolpathGenerator(cutting_config)
+        toolpaths = toolpath_generator.generate_toolpaths(processor.parts)
+        
+        if not toolpaths:
+            raise HTTPException(status_code=400, detail="Failed to generate toolpaths")
+        
+        # Export G-code
+        logger.info("Exporting G-code")
+        exporter = GCodeExporter(cutting_config, dialect=output_format)
+        exporter.export(toolpaths, output_path)
+        
+        # Schedule cleanup after response
+        background_tasks.add_task(cleanup_temp_files, [input_path, output_path], delay=300)
+        
+        # Return the file
+        return FileResponse(
+            output_path,
+            media_type='text/plain',
+            filename=output_filename,
+            headers={
+                "Content-Disposition": f"attachment; filename={output_filename}"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Conversion error: {str(e)}")
+        # Cleanup on error
+        for path in [input_path, output_path]:
+            if os.path.exists(path):
+                os.remove(path)
+        
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
+
+@app.post("/convert/advanced")
+async def convert_dxf_advanced(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    request: ConversionRequest = ...
+):
+    """Convert DXF with advanced configuration"""
+    
+    if not file.filename.lower().endswith('.dxf'):
+        raise HTTPException(status_code=400, detail="File must be a DXF file")
+    
+    # Generate unique filenames
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    input_filename = f"input_{timestamp}_{file.filename}"
+    output_filename = f"output_{timestamp}_{file.filename.replace('.dxf', '.gcode')}"
+    
+    input_path = os.path.join(app_config.temp_dir, input_filename)
+    output_path = os.path.join(app_config.temp_dir, output_filename)
+    
+    try:
+        # Save uploaded file
+        with open(input_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Create cutting configuration
+        cutting_config = CuttingConfig(
+            material=request.material_config,
+            tool=request.tool_config,
+            tabs=request.tab_config
+        )
+        
+        # Process DXF
+        logger.info(f"Processing DXF file: {input_filename}")
+        processor = DXFProcessor(tolerance=request.processing_config.tolerance)
+        dxf_info = processor.load_dxf(
+            input_path, 
+            layer_filter=request.processing_config.layer_filter
+        )
+        
+        if not processor.parts:
+            raise HTTPException(status_code=400, detail="No parts found in DXF file")
+        
+        # Generate toolpaths
+        logger.info("Generating toolpaths")
+        toolpath_generator = ToolpathGenerator(cutting_config)
+        toolpaths = toolpath_generator.generate_toolpaths(processor.parts)
+        
+        if not toolpaths:
+            raise HTTPException(status_code=400, detail="Failed to generate toolpaths")
+        
+        # Export G-code
+        logger.info("Exporting G-code")
+        exporter = GCodeExporter(cutting_config, dialect=request.output_format)
+        exporter.export(toolpaths, output_path)
+        
+        # Schedule cleanup after response
+        background_tasks.add_task(cleanup_temp_files, [input_path, output_path], delay=300)
+        
+        # Return the file
+        return FileResponse(
+            output_path,
+            media_type='text/plain',
+            filename=output_filename,
+            headers={
+                "Content-Disposition": f"attachment; filename={output_filename}"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Conversion error: {str(e)}")
+        # Cleanup on error
+        for path in [input_path, output_path]:
+            if os.path.exists(path):
+                os.remove(path)
+        
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
+
+def cleanup_temp_files(file_paths: list, delay: int = 0):
+    """Clean up temporary files after a delay"""
+    import time
+    
+    if delay > 0:
+        time.sleep(delay)
+    
+    for path in file_paths:
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                logger.info(f"Cleaned up temp file: {path}")
+        except Exception as e:
+            logger.error(f"Failed to clean up {path}: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
