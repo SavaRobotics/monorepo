@@ -4,7 +4,8 @@ PyCAM integration for polygon offsetting and contour processing
 
 import sys
 import os
-from typing import List, Tuple, Optional
+from typing import List, Tuple
+import numpy as np
 
 # Add PyCAM to path
 pycam_path = os.path.join(os.path.dirname(__file__), '..', 'temp_pycam')
@@ -15,12 +16,9 @@ try:
     from pycam.Geometry.Polygon import Polygon
     from pycam.Geometry.Line import Line
     from pycam.Geometry.Plane import Plane
-    from pycam.Geometry.PointUtils import *
-    from pycam.Geometry.Model import ContourModel
     PYCAM_AVAILABLE = True
 except ImportError:
     PYCAM_AVAILABLE = False
-    print("Warning: PyCAM not available for offsetting")
 
 from .dxf_processor import Geometry
 
@@ -71,13 +69,8 @@ class PyCAMOffsetProcessor:
             # Ensure the line connects properly by using the previous end point
             # This handles any small numerical differences
             line = Line(current_end, line_data['end'])
-            try:
-                polygon.append(line)
-                current_end = line_data['end']
-            except ValueError as e:
-                # If append fails, try to skip this segment
-                print(f"Warning: Skipping line segment {i}: {e}")
-                continue
+            polygon.append(line)
+            current_end = line_data['end']
         
         # Close the polygon if needed
         if polygon._points and polygon._points[0] != polygon._points[-1]:
@@ -91,8 +84,6 @@ class PyCAMOffsetProcessor:
     
     def _interpolate_arc(self, arc: Geometry, segments_per_mm: float = 0.5) -> List[Tuple[float, float]]:
         """Interpolate arc into points for polygon conversion"""
-        import numpy as np
-        
         # Calculate arc length
         angle_diff = abs(arc.end_angle - arc.start_angle)
         if angle_diff == 0:
@@ -178,17 +169,3 @@ class PyCAMOffsetProcessor:
         
         return result
     
-    def is_outer_contour(self, geometries: List[Geometry]) -> bool:
-        """Determine if a contour is an outer contour (counter-clockwise)"""
-        polygon = self.geometry_to_pycam_polygon(geometries)
-        if polygon:
-            return polygon.is_outer()
-        
-        # Fallback to simple area calculation
-        area = 0.0
-        for geom in geometries:
-            if geom.type == 'line':
-                # Shoelace formula component
-                area += (geom.end[0] - geom.start[0]) * (geom.end[1] + geom.start[1]) / 2
-        
-        return area > 0

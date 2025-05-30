@@ -103,9 +103,7 @@ async def validate_dxf(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Validation error: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Invalid DXF file: {str(e)}")
-    
     finally:
-        # Cleanup
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
