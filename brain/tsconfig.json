@@ -32,6 +32,8 @@
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "src/mcp_servers/**/*.py",
+    "src/mcp_servers/unfolder/src/sheet_metal/Resources/translations/**/*.ts"
   ]
 }
