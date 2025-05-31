@@ -5,6 +5,7 @@ import logging
 
 from .config import CuttingConfig, TabConfig
 from .dxf_processor import Part, Geometry
+from .pycam_integration import PyCAMOffsetProcessor, PYCAM_AVAILABLE
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +39,26 @@ class ToolpathGenerator:
         self.config = config
         self.toolpaths: List[Toolpath] = []
         
+        # Initialize PyCAM offset processor if available
+        self.offset_processor = None
+        if PYCAM_AVAILABLE:
+            try:
+                self.offset_processor = PyCAMOffsetProcessor()
+                logger.info("PyCAM offset processor initialized successfully")
+            except Exception as e:
+                logger.warning(f"Failed to initialize PyCAM offset processor: {e}")
+        
     def generate_toolpaths(self, parts: List[Part]) -> List[Toolpath]:
         """Generate toolpaths for all parts"""
         self.toolpaths = []
         
-        for part in parts:
+        for i, part in enumerate(parts):
+            # Log part info
+            bbox = part.bounding_box
+            width = bbox[2] - bbox[0]
+            height = bbox[3] - bbox[1]
+            logger.info(f"Processing part {i}: {width:.1f} x {height:.1f} mm")
+            
             # Generate outer contour toolpath with tabs
             contour_path = self._generate_contour_with_tabs(part)
             self.toolpaths.append(contour_path)
@@ -52,14 +68,57 @@ class ToolpathGenerator:
                 hole_path = self._generate_hole_toolpath(hole)
                 self.toolpaths.append(hole_path)
         
-        # Optimize toolpath order to minimize travel
-        # self.toolpaths = self._optimize_toolpath_order(self.toolpaths)
-        
         return self.toolpaths
     
     def _generate_contour_with_tabs(self, part: Part) -> Toolpath:
         """Generate contour toolpath with holding tabs"""
         contour = part.outer_contour
+        
+        # Apply tool offset to the contour
+        # For outer contours, we offset inward (negative) by tool radius
+        tool_radius = self.config.tool.diameter / 2.0
+        offset_contours = []
+        
+        if self.offset_processor:
+            try:
+                # Negative offset for outer contours (cut on the inside)
+                offset_contours = self.offset_processor.offset_contour(contour, -tool_radius)
+                if offset_contours:
+                    logger.info(f"Applied tool offset of {-tool_radius}mm to outer contour")
+                    logger.info(f"  Original contour: {len(contour)} segments")
+                    logger.info(f"  Offset resulted in {len(offset_contours)} contour(s)")
+                    
+                    # Filter out tiny contours that may be artifacts
+                    valid_contours = []
+                    for i, offset_contour in enumerate(offset_contours):
+                        bbox = self._calculate_bbox(offset_contour)
+                        width = bbox[2] - bbox[0]
+                        height = bbox[3] - bbox[1]
+                        area = width * height
+                        
+                        # Skip contours smaller than 1mm x 1mm or area less than 10 mm²
+                        if width < 1 or height < 1 or area < 10:
+                            logger.warning(f"  Skipping tiny offset contour {i}: {width:.3f} x {height:.3f} mm (area={area:.3f} mm²)")
+                        else:
+                            logger.info(f"  Valid offset contour {i}: {width:.3f} x {height:.3f} mm")
+                            valid_contours.append(offset_contour)
+                    
+                    if valid_contours:
+                        # Use the largest valid contour
+                        contour = max(valid_contours, key=lambda c: (
+                            (self._calculate_bbox(c)[2] - self._calculate_bbox(c)[0]) * 
+                            (self._calculate_bbox(c)[3] - self._calculate_bbox(c)[1])
+                        ))
+                        logger.info(f"  Using largest valid offset contour with {len(contour)} segments")
+                    else:
+                        logger.warning("  No valid offset contours found, using original")
+                else:
+                    logger.warning("Tool offset resulted in no valid contour, using original")
+            except Exception as e:
+                logger.error(f"Failed to apply tool offset: {e}")
+                logger.info("Falling back to original contour")
+        else:
+            logger.warning("No offset processor available, cutting on geometry line")
         
         # Calculate total contour length
         total_length = self._calculate_contour_length(contour)
@@ -116,6 +175,28 @@ class ToolpathGenerator:
     def _generate_hole_toolpath(self, hole: List[Geometry]) -> Toolpath:
         """Generate toolpath for a hole (no tabs)"""
         moves = []
+        
+        # Apply tool offset to the hole
+        # For holes (inside cuts), we offset outward (positive) by tool radius
+        tool_radius = self.config.tool.diameter / 2.0
+        offset_holes = []
+        original_hole = hole
+        
+        if self.offset_processor:
+            try:
+                # Positive offset for holes (cut on the outside)
+                offset_holes = self.offset_processor.offset_contour(hole, tool_radius)
+                if offset_holes:
+                    logger.info(f"Applied tool offset of {tool_radius}mm to hole")
+                    # Use the first offset contour
+                    hole = offset_holes[0]
+                else:
+                    logger.warning("Tool offset resulted in no valid hole contour, using original")
+            except Exception as e:
+                logger.error(f"Failed to apply tool offset to hole: {e}")
+                logger.info("Falling back to original hole geometry")
+        else:
+            logger.warning("No offset processor available, cutting on geometry line")
         
         # Find hole center and radius
         bbox = self._calculate_bbox(hole)
@@ -512,25 +593,6 @@ class ToolpathGenerator:
                 current_pos = move.end
                 
             elif geom.type == 'arc':
-                # Arc move with center point
-                # Determine if clockwise or counter-clockwise
-                # Cross product of start->center and start->end vectors
-                start_to_center = (geom.center[0] - geom.start[0], geom.center[1] - geom.start[1])
-                start_to_end = (geom.end[0] - geom.start[0], geom.end[1] - geom.start[1])
-                cross = start_to_center[0] * start_to_end[1] - start_to_center[1] * start_to_end[0]
-                
-                # Calculate angle span
-                start_angle = np.degrees(np.arctan2(geom.start[1] - geom.center[1], 
-                                                   geom.start[0] - geom.center[0]))
-                end_angle = np.degrees(np.arctan2(geom.end[1] - geom.center[1], 
-                                                 geom.end[0] - geom.center[0]))
-                
-                # Normalize angles
-                if start_angle < 0:
-                    start_angle += 360
-                if end_angle < 0:
-                    end_angle += 360
-                
                 # Determine direction based on the original arc's angle progression
                 angle_diff = geom.end_angle - geom.start_angle
                 if angle_diff < 0:
@@ -548,201 +610,7 @@ class ToolpathGenerator:
                 moves.append(move)
                 current_pos = move.end
         
-        # TODO: Handle tabs by breaking moves at tab locations
-        
         return moves
-    
-    def _cut_contour_with_tabs(self, contour: List[Geometry], tabs: List[Tab], 
-                              z_depth: float) -> List[Tuple[float, float, float]]:
-        """Generate cutting points for contour with tab handling"""
-        points = []
-        tab_height = z_depth + self.config.tabs.height
-        
-        # Track which tabs we've processed
-        processed_tabs = set()
-        
-        for geom in contour:
-            # Check if this segment contains any tabs
-            segment_tabs = []
-            for i, tab in enumerate(tabs):
-                if i not in processed_tabs and self._tab_on_segment(geom, tab):
-                    segment_tabs.append((i, tab))
-                    processed_tabs.add(i)
-            
-            if not segment_tabs:
-                # No tabs, cut normally
-                points.extend(self._cut_segment(geom, z_depth))
-            else:
-                # Cut segment with tabs
-                points.extend(self._cut_segment_with_tabs(geom, segment_tabs, z_depth, tab_height))
-        
-        return points
-    
-    def _tab_on_segment(self, geom: Geometry, tab: Tab) -> bool:
-        """Check if a tab is on a specific geometry segment"""
-        # Simplified: check if tab start point is close to segment
-        if geom.type == 'line':
-            # Check if tab start is on line segment
-            return self._point_on_line(tab.start_point, geom.start, geom.end)
-        elif geom.type == 'arc':
-            # Check if tab start is on arc
-            return self._point_on_arc(tab.start_point, geom)
-        return False
-    
-    def _point_on_line(self, point: Tuple[float, float], 
-                      start: Tuple[float, float], 
-                      end: Tuple[float, float], 
-                      tolerance: float = 0.1) -> bool:
-        """Check if point is on line segment"""
-        # Calculate distance from point to line
-        line_vec = np.array([end[0] - start[0], end[1] - start[1]])
-        line_len = np.linalg.norm(line_vec)
-        
-        if line_len < tolerance:
-            return False
-            
-        line_vec /= line_len
-        
-        point_vec = np.array([point[0] - start[0], point[1] - start[1]])
-        proj_len = np.dot(point_vec, line_vec)
-        
-        # Check if projection is within segment
-        if proj_len < 0 or proj_len > line_len:
-            return False
-            
-        # Calculate perpendicular distance
-        proj_point = start + proj_len * line_vec
-        dist = np.linalg.norm(point - proj_point)
-        
-        return dist < tolerance
-    
-    def _point_on_arc(self, point: Tuple[float, float], arc: Geometry, 
-                     tolerance: float = 0.1) -> bool:
-        """Check if point is on arc"""
-        # Check distance from center
-        dist = np.sqrt((point[0] - arc.center[0])**2 + (point[1] - arc.center[1])**2)
-        
-        if abs(dist - arc.radius) > tolerance:
-            return False
-            
-        # Check if angle is within arc range
-        angle = np.degrees(np.arctan2(point[1] - arc.center[1], point[0] - arc.center[0]))
-        
-        return self._angle_in_range(angle, arc.start_angle, arc.end_angle)
-    
-    def _angle_in_range(self, angle: float, start: float, end: float) -> bool:
-        """Check if angle is within range"""
-        angle = angle % 360
-        start = start % 360
-        end = end % 360
-        
-        if start <= end:
-            return start <= angle <= end
-        else:
-            return angle >= start or angle <= end
-    
-    def _cut_segment(self, geom: Geometry, z: float) -> List[Tuple[float, float, float]]:
-        """Generate cutting points for a segment"""
-        points = []
-        
-        if geom.type == 'line':
-            points.append((geom.start[0], geom.start[1], z))
-            points.append((geom.end[0], geom.end[1], z))
-        elif geom.type == 'arc':
-            # Generate points along arc with high resolution
-            points.extend(self._interpolate_arc(geom, z))
-        
-        return points
-    
-    def _cut_segment_with_tabs(self, geom: Geometry, tabs: List[Tuple[int, Tab]], 
-                              z_cut: float, z_tab: float) -> List[Tuple[float, float, float]]:
-        """Cut segment with tab handling"""
-        points = []
-        
-        # Sort tabs by position along segment
-        # For now, simplified implementation
-        for i, tab in tabs:
-            # Cut to tab start
-            points.append((tab.start_point[0], tab.start_point[1], z_cut))
-            
-            # Ramp up for tab
-            points.append((tab.start_point[0], tab.start_point[1], z_tab))
-            
-            # Move over tab
-            points.append((tab.end_point[0], tab.end_point[1], z_tab))
-            
-            # Ramp down after tab
-            points.append((tab.end_point[0], tab.end_point[1], z_cut))
-        
-        # Complete the segment
-        points.append((geom.end[0], geom.end[1], z_cut))
-        
-        return points
-    
-    def _interpolate_arc(self, arc: Geometry, z: float) -> List[Tuple[float, float, float]]:
-        """Interpolate points along an arc with high resolution"""
-        points = []
-        
-        # Calculate number of segments based on arc length
-        arc_length = self._get_segment_length(arc)
-        # Use 2 segments per mm for high resolution (0.5mm between points)
-        num_segments = max(8, int(arc_length * 2))
-        
-        # Generate points
-        start_angle_rad = np.radians(arc.start_angle)
-        end_angle_rad = np.radians(arc.end_angle)
-        
-        # Handle arc direction
-        if end_angle_rad < start_angle_rad:
-            end_angle_rad += 2 * np.pi
-            
-        for i in range(num_segments + 1):
-            t = i / num_segments
-            angle = start_angle_rad + t * (end_angle_rad - start_angle_rad)
-            
-            x = arc.center[0] + arc.radius * np.cos(angle)
-            y = arc.center[1] + arc.radius * np.sin(angle)
-            
-            points.append((x, y, z))
-        
-        return points
-    
-    def _generate_pocket_toolpath(self, contour: List[Geometry]) -> Toolpath:
-        """Generate toolpath for pocketing (inside cuts)"""
-        # Simplified pocket toolpath - just offset inward
-        points = []
-        
-        # Calculate center
-        bbox = self._calculate_bbox(contour)
-        center_x = (bbox[0] + bbox[2]) / 2
-        center_y = (bbox[1] + bbox[3]) / 2
-        
-        # Start from center and spiral out (or use other strategy)
-        # For now, just do a simple contour
-        start_point = contour[0].start
-        
-        # Safety height approach
-        points.append((start_point[0], start_point[1], self.config.safety_height))
-        
-        # Cut in steps
-        current_depth = 0
-        while current_depth < self.config.material.thickness:
-            current_depth = min(current_depth + self.config.material.step_down,
-                              self.config.material.thickness)
-            
-            # Cut the contour
-            for geom in contour:
-                points.extend(self._cut_segment(geom, -current_depth))
-        
-        # Retract
-        points.append((start_point[0], start_point[1], self.config.safety_height))
-        
-        return Toolpath(
-            type='pocket',
-            points=points,
-            feed_rate=self.config.material.feed_rate,
-            plunge_rate=self.config.material.plunge_rate
-        )
     
     def _calculate_bbox(self, contour: List[Geometry]) -> Tuple[float, float, float, float]:
         """Calculate bounding box of a contour"""
@@ -757,32 +625,3 @@ class ToolpathGenerator:
         y_coords = [p[1] for p in points]
         
         return (min(x_coords), min(y_coords), max(x_coords), max(y_coords))
-    
-    def _optimize_toolpath_order(self, toolpaths: List[Toolpath]) -> List[Toolpath]:
-        """Optimize toolpath order to minimize rapid moves"""
-        # Simple nearest-neighbor optimization
-        if len(toolpaths) <= 1:
-            return toolpaths
-        
-        optimized = [toolpaths[0]]
-        remaining = toolpaths[1:]
-        
-        while remaining:
-            last_point = optimized[-1].points[-1]
-            
-            # Find nearest toolpath
-            min_dist = float('inf')
-            nearest_idx = 0
-            
-            for i, tp in enumerate(remaining):
-                first_point = tp.points[0]
-                dist = np.sqrt((first_point[0] - last_point[0])**2 + 
-                             (first_point[1] - last_point[1])**2)
-                
-                if dist < min_dist:
-                    min_dist = dist
-                    nearest_idx = i
-            
-            optimized.append(remaining.pop(nearest_idx))
-        
-        return optimized

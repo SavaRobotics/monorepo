@@ -26,7 +26,17 @@
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
   "exclude": [
     "node_modules",
+<<<<<<< HEAD
     "src/mcp_servers/unfolder/src/sheet_metal/**/*",
     "**/translations/*.ts"
+=======
+    "dist",
+    ".next",
+    "src/mcp_servers/**/*.py",
+    "src/mcp_servers/unfolder/src/sheet_metal/**/*.py",
+    "src/mcp_servers/unfolder/src/sheet_metal/Resources/translations/**/*.ts",
+    "**/*.spec.ts",
+    "**/*.test.ts"
+>>>>>>> 0e0a937653db4067389b175a797d0619fddc8916
   ]
 }

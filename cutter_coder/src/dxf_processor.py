@@ -34,38 +34,71 @@ class DXFProcessor:
         
     def load_dxf(self, file_path: str, layer_filter: Optional[str] = None) -> Dict[str, Any]:
         """Load and analyze a DXF file"""
-        try:
-            doc = ezdxf.readfile(file_path)
-            msp = doc.modelspace()
+        doc = ezdxf.readfile(file_path)
+        msp = doc.modelspace()
+        
+        # Get sheet boundary
+        self._extract_boundary(msp)
+        
+        # Extract all entities from specified layer
+        entities = []
+        for entity in msp:
+            if layer_filter and hasattr(entity, 'dxf') and entity.dxf.layer != layer_filter:
+                continue
+            entities.append(entity)
+        
+        # Convert entities to geometry
+        geometries = self._entities_to_geometries(entities)
+        
+        # Find connected contours and identify parts
+        all_parts = self._find_parts(geometries)
+        
+        # Filter out sheet boundary if it exists
+        self.parts = []
+        
+        # First, identify the largest part (likely the sheet)
+        if len(all_parts) > 1:
+            # Calculate areas of all parts
+            part_areas = []
+            for i, part in enumerate(all_parts):
+                width = part.bounding_box[2] - part.bounding_box[0]
+                height = part.bounding_box[3] - part.bounding_box[1]
+                area = width * height
+                part_areas.append((i, area, part))
             
-            # Get sheet boundary
-            self._extract_boundary(msp)
+            # Sort by area (largest first)
+            part_areas.sort(key=lambda x: x[1], reverse=True)
             
-            # Extract all entities from specified layer
-            entities = []
-            for entity in msp:
-                if layer_filter and hasattr(entity, 'dxf') and entity.dxf.layer != layer_filter:
-                    continue
-                entities.append(entity)
-            
-            # Convert entities to geometry
-            geometries = self._entities_to_geometries(entities)
-            
-            # Find connected contours and identify parts
-            self.parts = self._find_parts(geometries)
-            
-            logger.info(f"Loaded DXF with {len(self.parts)} parts")
-            
-            return {
-                "parts_count": len(self.parts),
-                "sheet_boundary": self.sheet_boundary,
-                "layers": list(set(e.dxf.layer for e in msp if hasattr(e, 'dxf'))),
-                "total_entities": len(entities)
-            }
-            
-        except Exception as e:
-            logger.error(f"Error loading DXF: {str(e)}")
-            raise
+            # If the largest part is significantly bigger than the second largest, it's likely the sheet
+            if len(part_areas) >= 2:
+                largest_area = part_areas[0][1]
+                second_largest_area = part_areas[1][1]
+                
+                # If largest is more than 10x bigger than second largest, it's probably the sheet
+                if largest_area > second_largest_area * 10:
+                    sheet_part = part_areas[0][2]
+                    bbox = sheet_part.bounding_box
+                    logger.info(f"Filtered out sheet boundary (largest part): {bbox[2]-bbox[0]:.1f}x{bbox[3]-bbox[1]:.1f}mm, area={largest_area:.0f}mm²")
+                    
+                    # Add all parts except the sheet
+                    for idx, area, part in part_areas[1:]:
+                        self.parts.append(part)
+                else:
+                    # No clear sheet boundary, keep all parts
+                    self.parts = all_parts
+            else:
+                self.parts = all_parts
+        else:
+            self.parts = all_parts
+        
+        logger.info(f"Loaded DXF with {len(self.parts)} parts")
+        
+        return {
+            "parts_count": len(self.parts),
+            "sheet_boundary": self.sheet_boundary,
+            "layers": list(set(e.dxf.layer for e in msp if hasattr(e, 'dxf'))),
+            "total_entities": len(entities)
+        }
     
     def _extract_boundary(self, msp):
         """Extract sheet boundary from BOUNDARY layer"""
@@ -253,7 +286,7 @@ class DXFProcessor:
                 area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
                 
                 # Simple heuristic: small closed contours are holes
-                if area < 500:  # Adjust threshold as needed
+                if area < 500:
                     # This is likely a hole, will be assigned to a part later
                     pass
                 else:

@@ -54,8 +54,9 @@ async def root():
         "name": app_config.app_name,
         "version": app_config.version,
         "endpoints": {
+            "nested-dxf-to-gcode": "/nested-dxf-to-gcode",
             "convert": "/convert",
-            "validate": "/validate",
+            "validate": "/validate", 
             "materials": "/materials",
             "health": "/health"
         }
@@ -103,11 +104,95 @@ async def validate_dxf(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Validation error: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Invalid DXF file: {str(e)}")
-    
     finally:
-        # Cleanup
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+@app.post("/nested-dxf-to-gcode")
+async def convert_nested_dxf(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    tool_diameter: float = 3.175,  # Default 1/8 inch
+    feed_rate: float = 100,
+    plunge_rate: float = 50,
+    corner_exclusion_zone: float = 15.0
+):
+    """Convert nested DXF file to G-code with tool offset compensation"""
+    
+    if not file.filename.lower().endswith('.dxf'):
+        raise HTTPException(status_code=400, detail="File must be a DXF file")
+    
+    # Generate unique filenames
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    input_filename = f"input_{timestamp}_{file.filename}"
+    output_filename = f"output_{timestamp}_{file.filename.replace('.dxf', '.gcode')}"
+    
+    input_path = os.path.join(app_config.temp_dir, input_filename)
+    output_path = os.path.join(app_config.temp_dir, output_filename)
+    
+    try:
+        # Save uploaded file
+        with open(input_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Configure settings
+        material_config = MaterialConfig(
+            feed_rate=feed_rate,
+            plunge_rate=plunge_rate
+        )
+        
+        tool_config = ToolConfig(diameter=tool_diameter)
+        
+        tab_config = TabConfig(
+            enabled=True,
+            corner_exclusion_zone=corner_exclusion_zone
+        )
+        
+        cutting_config = CuttingConfig(
+            material=material_config,
+            tool=tool_config,
+            tabs=tab_config
+        )
+        
+        # Process DXF
+        logger.info(f"Processing nested DXF file: {input_filename}")
+        processor = DXFProcessor()
+        processor.load_dxf(input_path)
+        
+        if not processor.parts:
+            raise HTTPException(status_code=400, detail="No parts found in DXF file")
+        
+        # Generate toolpaths with offset
+        logger.info(f"Generating toolpaths with {tool_diameter}mm tool offset")
+        toolpath_generator = ToolpathGenerator(cutting_config)
+        toolpaths = toolpath_generator.generate_toolpaths(processor.parts)
+        
+        # Export G-code
+        logger.info("Exporting G-code")
+        exporter = GCodeExporter(cutting_config)
+        exporter.export(toolpaths, output_path)
+        
+        # Schedule cleanup
+        background_tasks.add_task(cleanup_temp_files, [input_path, output_path], delay=300)
+        
+        # Return the file
+        return FileResponse(
+            output_path,
+            media_type='text/plain',
+            filename=output_filename,
+            headers={
+                "Content-Disposition": f"attachment; filename={output_filename}"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Conversion error: {str(e)}")
+        # Cleanup on error
+        for path in [input_path, output_path]:
+            if os.path.exists(path):
+                os.remove(path)
+        
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
 
 @app.post("/convert")
 async def convert_dxf_to_gcode(

@@ -26,10 +26,7 @@ class TabConfig(BaseModel):
 
 class ToolConfig(BaseModel):
     type: ToolType = ToolType.END_MILL
-    diameter: float = Field(6.35, description="Tool diameter in mm")
-    flute_length: float = Field(25.0, description="Cutting flute length in mm")
-    total_length: float = Field(50.0, description="Total tool length in mm")
-    flutes: int = Field(2, description="Number of flutes")
+    diameter: float = Field(3.175, description="Tool diameter in mm")  # 1/8 inch
 
 class MaterialConfig(BaseModel):
     type: MaterialType = MaterialType.PLYWOOD
@@ -38,18 +35,12 @@ class MaterialConfig(BaseModel):
     plunge_rate: float = Field(300.0, description="Plunge rate in mm/min")
     spindle_speed: int = Field(18000, description="Spindle speed in RPM")
     step_down: float = Field(3.0, description="Step down per pass in mm")
-    finish_allowance: float = Field(0.1, description="Finish allowance in mm")
 
 class CuttingConfig(BaseModel):
     material: MaterialConfig = MaterialConfig()
     tool: ToolConfig = ToolConfig()
     tabs: TabConfig = TabConfig()
     safety_height: float = Field(5.0, description="Safety height above material in mm")
-    cutting_direction: str = Field("climb", description="climb or conventional")
-    enable_coolant: bool = False
-    arc_interpolation_tolerance: float = Field(0.1, description="Maximum deviation from true arc in mm")
-    min_arc_segments: int = Field(3, description="Minimum segments per arc")
-    max_arc_segments: int = Field(100, description="Maximum segments per arc")
     
 class DXFProcessingConfig(BaseModel):
     layer_filter: Optional[str] = Field("LargestFace", description="Layer to process")
