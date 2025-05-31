@@ -22,7 +22,7 @@ COPY src/mcp_servers/requirements.txt ./python-requirements.txt
 RUN pip install --no-cache-dir -r python-requirements.txt
 
 # Copy Node.js package files and install dependencies
-COPY package.json tsconfig.json ./
+COPY package.json tsconfig.json tsconfig.build.json ./
 COPY tailwind.config.js postcss.config.js next.config.js ./
 RUN npm install
 
@@ -34,8 +34,8 @@ COPY app/ ./app/
 RUN npm run build
 
 # Verify both Python and Node.js MCP servers are available
-RUN python3 -c "import sys; sys.path.append('./src'); from mcp_servers.nesting import server; print('✅ Python nesting server imported successfully')" || echo "❌ Python nesting server failed"
-RUN npx @supabase/mcp-server-postgrest --version 2>/dev/null || echo "✅ Supabase MCP server available"
+#RUN python3 -c "import sys; sys.path.append('./src'); from mcp_servers.nesting import server; print('✅ Python nesting server imported successfully')" || echo "❌ Python nesting server failed"
+#RUN npx @supabase/mcp-server-postgrest --version 2>/dev/null || echo "✅ Supabase MCP server available"
 
 # Set environment variables
 ENV PYTHONPATH="/app/src"

@@ -5,7 +5,7 @@
   "main": "dist/main.js",
   "type": "module",
   "scripts": {
-    "build": "next build && tsc",
+    "build": "next build && tsc -p tsconfig.build.json",
     "start": "npm run next:start",
     "debug": "node dist/debug-tools.js",
     "dev": "next dev",
