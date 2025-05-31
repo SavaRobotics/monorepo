@@ -231,12 +231,12 @@ async def unfold_step_file(
             # Path to the unfold script
             unfold_script = os.path.abspath(os.path.join(
                 os.path.dirname(__file__), 
-                '..', '..', '..', '..', 'unfolder', 'src', 'unfolder', 'unfold.py'
+                'src', 'unfolder', 'unfold.py'
             ))
             
             if not os.path.exists(unfold_script):
-                # Try alternative path
-                unfold_script = '/app/src/unfolder/unfold.py'
+                # Try alternative path for Docker container
+                unfold_script = '/app/src/mcp_servers/unfolder/src/unfolder/unfold.py'
             
             print(f"Using unfold script: {unfold_script}", file=sys.stderr)
             print(f"Script exists: {os.path.exists(unfold_script)}", file=sys.stderr)
@@ -244,7 +244,8 @@ async def unfold_step_file(
             # Run FreeCAD in headless mode
             unfolder_status["message"] = "Running FreeCAD conversion..."
             
-            cmd = ['freecad', step_path, '-c', unfold_script]
+            # Use FreeCADCmd for true headless operation
+            cmd = ['freecadcmd', '-c', unfold_script, step_path]
             
             print(f"Running command: {' '.join(cmd)}", file=sys.stderr)
             

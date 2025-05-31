@@ -49,7 +49,7 @@ export class LLMWorkflow {
   ): Promise<WorkflowResult> {
     const {
       prompt,
-      model = 'claude-3-5-sonnet-20241022',
+      model = 'claude-opus-4-20250514',
       maxIterations = 10,
       temperature = 0,
       maxTokens = 4096,

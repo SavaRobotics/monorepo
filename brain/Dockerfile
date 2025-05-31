@@ -11,6 +11,13 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     build-essential \
     git \
+    # FreeCAD and dependencies for unfolder service
+    freecad \
+    libocct-data-exchange-7.5 \
+    libocct-foundation-7.5 \
+    libocct-modeling-algorithms-7.5 \
+    libocct-modeling-data-7.5 \
+    libocct-ocaf-7.5 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create Python virtual environment for isolation

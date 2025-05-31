@@ -62,11 +62,11 @@ class GcodeServer {
             properties: {
               dxf_path: {
                 type: 'string',
-                description: 'Local path to DXF file',
+                description: 'Local path to DXF file (provide either dxf_path or dxf_url)',
               },
               dxf_url: {
                 type: 'string',
-                description: 'URL to download DXF file from',
+                description: 'URL to download DXF file from (provide either dxf_path or dxf_url)',
               },
               cutter_params: {
                 type: 'object',
@@ -74,10 +74,7 @@ class GcodeServer {
                 additionalProperties: true,
               },
             },
-            oneOf: [
-              { required: ['dxf_path'] },
-              { required: ['dxf_url'] },
-            ],
+            required: [],
           },
         },
         {

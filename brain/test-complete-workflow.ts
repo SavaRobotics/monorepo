@@ -117,7 +117,7 @@ Use the appropriate tools to accomplish this complete manufacturing workflow.`;
 
       // Get Claude's response
       const response = await anthropic.messages.create({
-        model: 'claude-3-5-sonnet-20241022',
+        model: 'claude-opus-4-20250514',
         messages: messages,
         max_tokens: 4096,
         tools: anthropicTools,
