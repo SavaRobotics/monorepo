@@ -4,10 +4,11 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  CallToolRequest,
 } from '@modelcontextprotocol/sdk/types.js';
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import fetch from 'node-fetch';
+import { readFile } from 'fs/promises';
+import { basename, parse } from 'path';
+import FormData from 'form-data';
 
 interface DxfToCutterParams {
   dxf_path?: string;
@@ -18,6 +19,7 @@ interface DxfToCutterParams {
 interface UploadGcodeParams {
   gcode_content: string;
   filename?: string;
+  bucket_name?: string;
   metadata?: Record<string, any>;
 }
 
@@ -41,7 +43,7 @@ class GcodeServer {
     );
 
     // Initialize from environment variables
-    this.cutterCoderUrl = process.env.CUTTER_CODER_URL || 'http://localhost:7000';
+    this.cutterCoderUrl = process.env.CUTTER_CODER_URL || 'http://0.0.0.0:7777';
     this.supabaseUrl = process.env.SUPABASE_URL || '';
     this.supabaseKey = process.env.SUPABASE_KEY || '';
 
@@ -92,6 +94,11 @@ class GcodeServer {
                 type: 'string',
                 description: 'Optional custom filename (without extension)',
               },
+              bucket_name: {
+                type: 'string',
+                description: 'Storage bucket name (default: gcode_files)',
+                default: 'gcode_files',
+              },
               metadata: {
                 type: 'object',
                 description: 'Optional metadata about the G-code',
@@ -105,14 +112,14 @@ class GcodeServer {
     }));
 
     // Handle tool calls
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    this.server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest) => {
       const { name, arguments: args } = request.params;
 
       switch (name) {
         case 'send_dxf_to_cutter':
-          return await this.sendDxfToCutter(args as DxfToCutterParams);
+          return await this.sendDxfToCutter(args as unknown as DxfToCutterParams);
         case 'upload_gcode_to_supabase':
-          return await this.uploadGcodeToSupabase(args as UploadGcodeParams);
+          return await this.uploadGcodeToSupabase(args as unknown as UploadGcodeParams);
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
@@ -126,21 +133,20 @@ class GcodeServer {
 
       // Get DXF content either from file or URL
       if (params.dxf_path) {
-        dxfContent = await fs.readFile(params.dxf_path);
-        filename = path.basename(params.dxf_path);
+        dxfContent = await readFile(params.dxf_path);
+        filename = basename(params.dxf_path);
       } else if (params.dxf_url) {
         const response = await fetch(params.dxf_url);
         if (!response.ok) {
           throw new Error(`Failed to download DXF: ${response.statusText}`);
         }
         dxfContent = Buffer.from(await response.arrayBuffer());
-        filename = path.basename(new URL(params.dxf_url).pathname) || 'downloaded.dxf';
+        filename = basename(new URL(params.dxf_url).pathname) || 'downloaded.dxf';
       } else {
         throw new Error('Either dxf_path or dxf_url must be provided');
       }
 
       // Prepare form data for multipart upload
-      const FormData = (await import('form-data')).default;
       const formData = new FormData();
       formData.append('dxf_file', dxfContent, {
         filename: filename,
@@ -175,7 +181,7 @@ class GcodeServer {
             text: JSON.stringify({
               success: true,
               gcode_content: result.gcode || result.gcode_content,
-              filename: result.filename || `${path.parse(filename).name}.nc`,
+              filename: result.filename || `${parse(filename).name}.nc`,
               message: 'Successfully generated G-code',
               metadata: result.metadata || {},
             }),
@@ -210,30 +216,39 @@ class GcodeServer {
         ? `${params.filename}.nc`
         : `gcode_${timestamp}.nc`;
 
-      // Prepare the upload
-      const bucket = 'gcodes';
+      // Use provided bucket or default to gcode_files
+      const bucket = params.bucket_name || 'gcode_files';
       const uploadUrl = `${this.supabaseUrl}/storage/v1/object/${bucket}/${filename}`;
+
+      // Convert string to buffer for proper content length
+      const contentBuffer = Buffer.from(params.gcode_content, 'utf8');
 
       const response = await fetch(uploadUrl, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${this.supabaseKey}`,
-          'Content-Type': 'text/plain',
-          'Content-Length': String(Buffer.byteLength(params.gcode_content)),
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Content-Length': String(contentBuffer.length),
+          'x-upsert': 'false', // Don't overwrite existing files
         },
-        body: params.gcode_content,
+        body: contentBuffer,
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Upload failed: ${response.status} - ${errorText}`);
+        // Try to parse error details if available
+        let errorDetails = errorText;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorDetails = errorJson.error || errorJson.message || errorText;
+        } catch {
+          // Use raw error text if not JSON
+        }
+        throw new Error(`Upload failed: ${response.status} - ${errorDetails}`);
       }
 
       // Construct public URL
       const publicUrl = `${this.supabaseUrl}/storage/v1/object/public/${bucket}/${filename}`;
-
-      // If metadata provided, you might want to store it in a database table
-      // For now, we'll just include it in the response
 
       return {
         content: [
@@ -244,9 +259,10 @@ class GcodeServer {
               public_url: publicUrl,
               path: filename,
               bucket: bucket,
-              file_size: Buffer.byteLength(params.gcode_content),
+              file_size: contentBuffer.length,
+              content_type: 'text/plain; charset=utf-8',
               metadata: params.metadata || {},
-              message: `Successfully uploaded G-code to Supabase: ${filename}`,
+              message: `Successfully uploaded G-code to Supabase storage: ${bucket}/${filename}`,
             }),
           },
         ],
