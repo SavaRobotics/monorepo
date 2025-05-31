@@ -1,4 +1,4 @@
-import { MCPServerConfig } from '../types.js';
+import { MCPServerConfig } from '../types';
 
 export const gcodeMCP: MCPServerConfig = {
   name: 'gcode',

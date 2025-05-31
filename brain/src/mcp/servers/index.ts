@@ -1,8 +1,8 @@
-import { supabaseMCP } from './supabase.js';
-import { nestingMCP } from './nesting.js';
-import { unfolderMCP } from './unfolder.js';
-import { gcodeMCP } from './gcode.js';
-import { MCPServerConfig } from '../types.js';
+import { supabaseMCP } from './supabase';
+import { nestingMCP } from './nesting';
+import { unfolderMCP } from './unfolder';
+import { gcodeMCP } from './gcode';
+import { MCPServerConfig } from '../types';
 
 // Export all available MCP servers
 export const availableServers: MCPServerConfig[] = [
