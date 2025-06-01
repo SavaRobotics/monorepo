@@ -4,7 +4,7 @@ import { createStep, createWorkflow } from '@mastra/core/workflows';
 import { RuntimeContext } from '@mastra/core/di';
 import { z } from 'zod';
 import { dockerUnfoldTool } from '../tools/unfolder/docker-unfold-tool';
-import { uploadDxfToSupabaseTool, uploadNestedDxfToSupabaseTool } from '../tools/supabase';
+import { uploadDxfToSupabaseTool, uploadNestedDxfToSupabaseTool, updatePartDxfUrlTool, getAllDxfFilesUrlsTool } from '../tools/supabase';
 import { nestDxfTool } from '../tools/nesting/nester';
 import fs from 'fs/promises';
 import path from 'path';
@@ -33,6 +33,7 @@ const executeUnfold = createStep({
       processingTime: z.number(),
     }),
     processingNotes: z.string(),
+    cadFileUrl: z.string().url(),
   }),
   execute: async ({ inputData }) => {
     if (!inputData) {
@@ -79,14 +80,15 @@ const executeUnfold = createStep({
     return {
       unfoldResult: result,
       processingNotes: notes,
+      cadFileUrl: cadFileUrl,
     };
   },
 });
 
-// Save DXF file step
-const saveDxfFile = createStep({
-  id: 'save-dxf-file',
-  description: 'Saves the DXF file to local storage',
+// Save DXF to Supabase step
+const saveDxfToSupabase = createStep({
+  id: 'save-dxf-to-supabase',
+  description: 'Saves the DXF file directly to Supabase storage bucket',
   inputSchema: z.object({
     unfoldResult: z.object({
       success: z.boolean(),
@@ -99,6 +101,7 @@ const saveDxfFile = createStep({
       processingTime: z.number(),
     }),
     processingNotes: z.string(),
+    cadFileUrl: z.string().url(),
   }),
   outputSchema: z.object({
     unfoldResult: z.object({
@@ -112,49 +115,495 @@ const saveDxfFile = createStep({
       processingTime: z.number(),
     }),
     processingNotes: z.string(),
-    savedFilePath: z.string().optional(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    cadFileUrl: z.string().url(),
   }),
   execute: async ({ inputData }) => {
     if (!inputData) {
       throw new Error('Input data not found');
     }
 
-    const { unfoldResult, processingNotes } = inputData;
-    let savedFilePath: string | undefined;
+    const { unfoldResult, processingNotes, cadFileUrl } = inputData;
+    let supabaseUrl: string | undefined;
+    let uploadSuccess = false;
 
-    // Save DXF file if the unfold was successful
+    // Upload DXF file if the unfold was successful
     if (unfoldResult.success && unfoldResult.outputFiles.length > 0) {
-      // Find the DXF file
+      // Find the DXF file (should be the first one)
       const dxfFile = unfoldResult.outputFiles.find(file => 
         file.mimeType === 'application/dxf' || file.filename.endsWith('.dxf')
-      );
+      ) || unfoldResult.outputFiles[0];
 
       if (dxfFile) {
         try {
-          // Create output directory
-          const outputDir = path.join(process.cwd(), 'output', 'unfolded-dxf');
-          await fs.mkdir(outputDir, { recursive: true });
+          // Get Supabase credentials from environment variables
+          const supabaseProjectUrl = process.env.SUPABASE_URL || 'https://pynaxyfwywlqfvtjbtuc.supabase.co';
+          const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5bmF4eWZ3eXdscWZ2dGpidHVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwNzYxNiwiZXhwIjoyMDYzNzgzNjE2fQ.2jv211NlxOdDcbtE6GxGl7kg38JxvwWZx1sPz9HtzBg';
 
-          // Generate filename with timestamp
-          const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-          const filename = `unfolded_${timestamp}.dxf`;
-          savedFilePath = path.join(outputDir, filename);
+          console.log('📤 Uploading DXF to Supabase storage...');
+          
+          // Execute the upload tool with raw DXF content
+          const uploadResult = await uploadDxfToSupabaseTool.execute({
+            context: {
+              supabaseUrl: supabaseProjectUrl,
+              supabaseKey: supabaseKey,
+              dxfContent: dxfFile.content,
+              filename: dxfFile.filename,
+              bucketName: 'dxffiles',
+            },
+            runtimeContext: new RuntimeContext(),
+          });
 
-          // Write the DXF content to file
-          await fs.writeFile(savedFilePath, dxfFile.content, 'utf-8');
-
-          console.log(`✅ DXF file saved to: ${savedFilePath}`);
-          console.log(`📏 File size: ${Math.round(dxfFile.content.length / 1024)}KB`);
+          if (uploadResult.success && uploadResult.publicUrl) {
+            supabaseUrl = uploadResult.publicUrl;
+            uploadSuccess = true;
+            console.log(`✅ DXF uploaded to Supabase: ${supabaseUrl}`);
+            console.log(`📏 File size: ${Math.round(dxfFile.content.length / 1024)}KB`);
+          } else {
+            console.error(`❌ Failed to upload to Supabase: ${uploadResult.error}`);
+          }
         } catch (error) {
-          console.error(`❌ Error saving DXF file: ${error}`);
+          console.error(`❌ Error uploading to Supabase: ${error}`);
         }
       }
     }
 
     return {
       unfoldResult,
-      processingNotes: processingNotes + (savedFilePath ? `\n📁 File saved to: ${savedFilePath}` : ''),
-      savedFilePath,
+      processingNotes: processingNotes + (supabaseUrl ? `\n☁️ Uploaded to Supabase: ${supabaseUrl}` : ''),
+      supabaseUrl,
+      supabaseUploadSuccess: uploadSuccess,
+      cadFileUrl,
+    };
+  },
+});
+
+// Update parts table with DXF URL step
+const updatePartsTableWithDxf = createStep({
+  id: 'update-parts-table-with-dxf',
+  description: 'Updates the parts table with the DXF file URL',
+  inputSchema: z.object({
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    cadFileUrl: z.string().url().describe('Original CAD file URL'),
+  }),
+  outputSchema: z.object({
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+  }),
+  execute: async ({ inputData }) => {
+    if (!inputData) {
+      throw new Error('Input data not found');
+    }
+
+    const { unfoldResult, processingNotes, supabaseUrl, supabaseUploadSuccess, cadFileUrl } = inputData;
+    let partsTableUpdateSuccess = false;
+    let updatedPartId: number | undefined;
+
+    // Only update parts table if we successfully uploaded to Supabase
+    if (supabaseUploadSuccess && supabaseUrl) {
+      try {
+        // Extract the STEP filename from the CAD file URL
+        const stepFilename = cadFileUrl.split('/').pop() || '';
+        
+        // Get Supabase credentials
+        const supabaseProjectUrl = process.env.SUPABASE_URL || 'https://pynaxyfwywlqfvtjbtuc.supabase.co';
+        const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5bmF4eWZ3eXdscWZ2dGpidHVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwNzYxNiwiZXhwIjoyMDYzNzgzNjE2fQ.2jv211NlxOdDcbtE6GxGl7kg38JxvwWZx1sPz9HtzBg';
+
+        console.log(`📝 Updating parts table for STEP file: ${stepFilename}`);
+        
+        // Execute the update tool
+        const updateResult = await updatePartDxfUrlTool.execute({
+          context: {
+            supabaseUrl: supabaseProjectUrl,
+            supabaseKey: supabaseKey,
+            stepFilename: stepFilename,
+            dxfUrl: supabaseUrl,
+          },
+          runtimeContext: new RuntimeContext(),
+        });
+
+        if (updateResult.success) {
+          partsTableUpdateSuccess = true;
+          updatedPartId = updateResult.updatedPartId;
+          console.log(`✅ Parts table updated successfully for part ID: ${updatedPartId}`);
+        } else {
+          console.error(`❌ Failed to update parts table: ${updateResult.error}`);
+        }
+      } catch (error) {
+        console.error(`❌ Error updating parts table: ${error}`);
+      }
+    }
+
+    return {
+      unfoldResult,
+      processingNotes: processingNotes + 
+        (partsTableUpdateSuccess 
+          ? `\n📊 Parts table updated for part ID: ${updatedPartId}` 
+          : ''),
+      supabaseUrl,
+      supabaseUploadSuccess,
+      partsTableUpdateSuccess,
+      updatedPartId,
+    };
+  },
+});
+
+// Get all DXF files URLs step
+const getAllDxfFilesUrls = createStep({
+  id: 'get-all-dxf-files-urls',
+  description: 'Gets all DXF files URLs from the parts table',
+  inputSchema: z.object({
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+  }),
+  outputSchema: z.object({
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()).describe('All DXF files URLs from parts table'),
+    dxfFilesCount: z.number().describe('Total count of DXF files'),
+  }),
+  execute: async ({ inputData }) => {
+    if (!inputData) {
+      throw new Error('Input data not found');
+    }
+
+    const { unfoldResult, processingNotes, supabaseUrl, supabaseUploadSuccess, partsTableUpdateSuccess, updatedPartId } = inputData;
+    let dxfFilesUrls: string[] = [];
+    let dxfFilesCount = 0;
+
+    try {
+      // Get Supabase credentials
+      const supabaseProjectUrl = process.env.SUPABASE_URL || 'https://pynaxyfwywlqfvtjbtuc.supabase.co';
+      const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5bmF4eWZ3eXdscWZ2dGpidHVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwNzYxNiwiZXhwIjoyMDYzNzgzNjE2fQ.2jv211NlxOdDcbtE6GxGl7kg38JxvwWZx1sPz9HtzBg';
+
+      console.log('📋 Fetching all DXF files URLs from parts table...');
+      
+      // Execute the tool to get all DXF files URLs
+      const result = await getAllDxfFilesUrlsTool.execute({
+        context: {
+          supabaseUrl: supabaseProjectUrl,
+          supabaseKey: supabaseKey,
+        },
+        runtimeContext: new RuntimeContext(),
+      });
+
+      dxfFilesUrls = result.dxfFilesUrls;
+      dxfFilesCount = result.count;
+
+      console.log(`✅ Found ${dxfFilesCount} DXF files in parts table`);
+      if (dxfFilesCount > 0) {
+        console.log('📐 DXF files URLs:');
+        dxfFilesUrls.forEach((url, index) => {
+          console.log(`  ${index + 1}. ${url}`);
+        });
+      }
+    } catch (error) {
+      console.error(`❌ Error fetching DXF files URLs: ${error}`);
+    }
+
+    return {
+      unfoldResult,
+      processingNotes: processingNotes + 
+        `\n\n📋 DXF Files in Database:\n• Total files: ${dxfFilesCount}` +
+        (dxfFilesCount > 0 ? `\n• URLs:\n${dxfFilesUrls.map((url, i) => `  ${i + 1}. ${url}`).join('\n')}` : ''),
+      supabaseUrl,
+      supabaseUploadSuccess,
+      partsTableUpdateSuccess,
+      updatedPartId,
+      dxfFilesUrls,
+      dxfFilesCount,
+    };
+  },
+});
+
+// Call nester Docker container step
+const callNesterDocker = createStep({
+  id: 'call-nester-docker',
+  description: 'Calls the nester Docker container with DXF URLs to get nested DXF',
+  inputSchema: z.object({
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()).describe('All DXF files URLs from parts table'),
+    dxfFilesCount: z.number().describe('Total count of DXF files'),
+  }),
+  outputSchema: z.object({
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()),
+    dxfFilesCount: z.number(),
+    nestedDxfContent: z.string().optional().describe('Raw content of the nested DXF file'),
+    nestedDxfSuccess: z.boolean(),
+  }),
+  execute: async ({ inputData }) => {
+    if (!inputData) {
+      throw new Error('Input data not found');
+    }
+
+    const { unfoldResult, processingNotes, supabaseUrl, supabaseUploadSuccess, partsTableUpdateSuccess, updatedPartId, dxfFilesUrls, dxfFilesCount } = inputData;
+    let nestedDxfContent: string | undefined;
+    let nestedDxfSuccess = false;
+
+    // Only call nester if we have DXF URLs
+    if (dxfFilesUrls.length > 0) {
+      try {
+        console.log('🔧 Calling nester Docker container...');
+        
+        // Construct the URL with DXF URLs as query parameter
+        const nesterUrl = `http://localhost:5002/nest?urls=${dxfFilesUrls.join(',')}`;
+        
+        console.log(`📡 Request URL: ${nesterUrl}`);
+        
+        // Make GET request to nester Docker container
+        const response = await fetch(nesterUrl);
+        
+        if (!response.ok) {
+          throw new Error(`Nester API error: ${response.status} ${response.statusText}`);
+        }
+        
+        // Get the nested DXF content
+        nestedDxfContent = await response.text();
+        nestedDxfSuccess = true;
+        
+        console.log(`✅ Received nested DXF file (${Math.round(nestedDxfContent.length / 1024)}KB)`);
+        console.log(`📐 Nested DXF preview: ${nestedDxfContent.substring(0, 100)}...`);
+        
+      } catch (error) {
+        console.error(`❌ Error calling nester Docker container: ${error}`);
+      }
+    } else {
+      console.log('⚠️ No DXF URLs available for nesting');
+    }
+
+    return {
+      unfoldResult,
+      processingNotes: processingNotes + 
+        (nestedDxfSuccess 
+          ? `\n\n🔧 Nesting Results:\n• Success: ✅\n• Nested DXF size: ${Math.round((nestedDxfContent?.length || 0) / 1024)}KB`
+          : '\n\n🔧 Nesting Results:\n• Success: ❌'),
+      supabaseUrl,
+      supabaseUploadSuccess,
+      partsTableUpdateSuccess,
+      updatedPartId,
+      dxfFilesUrls,
+      dxfFilesCount,
+      nestedDxfContent,
+      nestedDxfSuccess,
+    };
+  },
+});
+
+// Upload nested DXF to Supabase step
+const uploadNestedDxfToSupabaseStep = createStep({
+  id: 'upload-nested-dxf-to-supabase-step',
+  description: 'Uploads the nested DXF file to Supabase storage in the nested folder',
+  inputSchema: z.object({
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()),
+    dxfFilesCount: z.number(),
+    nestedDxfContent: z.string().optional(),
+    nestedDxfSuccess: z.boolean(),
+  }),
+  outputSchema: z.object({
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()),
+    dxfFilesCount: z.number(),
+    nestedDxfContent: z.string().optional(),
+    nestedDxfSuccess: z.boolean(),
+    nestedDxfUrl: z.string().optional(),
+    nestedDxfUploadSuccess: z.boolean(),
+  }),
+  execute: async ({ inputData }) => {
+    if (!inputData) {
+      throw new Error('Input data not found');
+    }
+
+    const { 
+      unfoldResult, 
+      processingNotes, 
+      supabaseUrl, 
+      supabaseUploadSuccess, 
+      partsTableUpdateSuccess, 
+      updatedPartId, 
+      dxfFilesUrls, 
+      dxfFilesCount,
+      nestedDxfContent,
+      nestedDxfSuccess
+    } = inputData;
+    
+    let nestedDxfUrl: string | undefined;
+    let nestedDxfUploadSuccess = false;
+
+    // Only upload if we have nested DXF content
+    if (nestedDxfSuccess && nestedDxfContent) {
+      try {
+        // Get Supabase credentials
+        const supabaseProjectUrl = process.env.SUPABASE_URL || 'https://pynaxyfwywlqfvtjbtuc.supabase.co';
+        const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5bmF4eWZ3eXdscWZ2dGpidHVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwNzYxNiwiZXhwIjoyMDYzNzgzNjE2fQ.2jv211NlxOdDcbtE6GxGl7kg38JxvwWZx1sPz9HtzBg';
+
+        console.log('📤 Uploading nested DXF to Supabase storage...');
+        
+        // Generate filename with timestamp
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `nested_${timestamp}.dxf`;
+        
+        // Create Supabase client
+        const { createClient } = await import('@supabase/supabase-js');
+        const supabase = createClient(supabaseProjectUrl, supabaseKey);
+        
+        // Convert string content to Blob
+        const blob = new Blob([nestedDxfContent], { type: 'application/dxf' });
+        
+        // Upload to nested folder in dxffiles bucket
+        const path = `nested/${filename}`;
+        const { data, error } = await supabase.storage
+          .from('dxffiles')
+          .upload(path, blob, {
+            contentType: 'application/dxf',
+            upsert: false,
+          });
+        
+        if (error) {
+          throw new Error(`Upload failed: ${error.message}`);
+        }
+        
+        // Get the public URL
+        const { data: urlData } = supabase.storage
+          .from('dxffiles')
+          .getPublicUrl(path);
+        
+        nestedDxfUrl = urlData.publicUrl;
+        nestedDxfUploadSuccess = true;
+        
+        console.log(`✅ Nested DXF uploaded to Supabase: ${nestedDxfUrl}`);
+        console.log(`📏 File size: ${Math.round(nestedDxfContent.length / 1024)}KB`);
+        
+      } catch (error) {
+        console.error(`❌ Error uploading nested DXF to Supabase: ${error}`);
+      }
+    }
+
+    return {
+      unfoldResult,
+      processingNotes: processingNotes + 
+        (nestedDxfUploadSuccess && nestedDxfUrl
+          ? `\n☁️ Nested DXF uploaded to: ${nestedDxfUrl}`
+          : ''),
+      supabaseUrl,
+      supabaseUploadSuccess,
+      partsTableUpdateSuccess,
+      updatedPartId,
+      dxfFilesUrls,
+      dxfFilesCount,
+      nestedDxfContent,
+      nestedDxfSuccess,
+      nestedDxfUrl,
+      nestedDxfUploadSuccess,
     };
   },
 });
@@ -580,12 +1029,7 @@ const cadUnfoldTestWorkflow = createWorkflow({
     bendRadius: z.number().positive().optional().describe('Bend radius for sheet metal operations'),
   }),
   outputSchema: z.object({
-    analysis: z.string(),
-    recommendations: z.string(),
-    dxfContent: z.string().optional(),
-    savedFilePath: z.string().optional(),
-    supabaseUrl: z.string().optional(),
-    supabaseUploadSuccess: z.boolean(),
+    // For testing the executeUnfold and saveDxfFile steps
     unfoldResult: z.object({
       success: z.boolean(),
       outputFiles: z.array(z.object({
@@ -596,26 +1040,49 @@ const cadUnfoldTestWorkflow = createWorkflow({
       logs: z.string(),
       processingTime: z.number(),
     }),
-    nestingResult: z.object({
-      success: z.boolean(),
-      nestedDxfUrl: z.string().url().optional(),
-      utilization: z.number().optional(),
-      placedParts: z.number().optional(),
-      totalParts: z.number().optional(),
-      message: z.string(),
-      error: z.string().optional(),
-      processingTime: z.number().optional(),
-    }).optional(),
-    nestedSupabaseUrl: z.string().optional(),
-    nestedSupabaseUploadSuccess: z.boolean(),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()),
+    dxfFilesCount: z.number(),
+    nestedDxfContent: z.string().optional(),
+    nestedDxfSuccess: z.boolean(),
+    nestedDxfUrl: z.string().optional(),
+    nestedDxfUploadSuccess: z.boolean(),
+    
+    // Comment out the other properties for now since we're not running those steps
+    // analysis: z.string(),
+    // recommendations: z.string(),
+    // dxfContent: z.string().optional(),
+    // supabaseUrl: z.string().optional(),
+    // supabaseUploadSuccess: z.boolean(),
+    // nestingResult: z.object({
+    //   success: z.boolean(),
+    //   nestedDxfUrl: z.string().url().optional(),
+    //   utilization: z.number().optional(),
+    //   placedParts: z.number().optional(),
+    //   totalParts: z.number().optional(),
+    //   message: z.string(),
+    //   error: z.string().optional(),
+    //   processingTime: z.number().optional(),
+    // }).optional(),
+    // nestedSupabaseUrl: z.string().optional(),
+    // nestedSupabaseUploadSuccess: z.boolean(),
   }),
 })
   .then(executeUnfold)
-  .then(saveDxfFile)
-  .then(uploadDxfToSupabase)
-  .then(nestDxfFiles)
-  .then(uploadNestedDxfToSupabase)
-  .then(analyzeResults);
+  .then(saveDxfToSupabase)
+  .then(updatePartsTableWithDxf)
+  .then(getAllDxfFilesUrls)
+  .then(callNesterDocker)
+  .then(uploadNestedDxfToSupabaseStep)
+  // Comment out the other steps for now - just testing the docker unfold and file saving
+  // .then(uploadDxfToSupabase)
+  // .then(nestDxfFiles)
+  // .then(uploadNestedDxfToSupabase)
+  // .then(analyzeResults);
 
 cadUnfoldTestWorkflow.commit();
 

@@ -24,6 +24,57 @@ export const getDxfUrlsTool = createTool({
   },
 });
 
+export const getAllDxfFilesUrlsTool = createTool({
+  id: 'get-all-dxf-files-urls',
+  description: 'Fetches all DXF files URLs from the dxf_url column in the parts table',
+  inputSchema: z.object({
+    supabaseUrl: z.string().describe('Supabase project URL'),
+    supabaseKey: z.string().describe('Supabase anon key'),
+  }),
+  outputSchema: z.object({
+    dxfFilesUrls: z.array(z.string()).describe('Array of DXF files URLs from dxf_url column'),
+    count: z.number().describe('Total number of DXF files URLs found'),
+  }),
+  execute: async ({ context }) => {
+    const { supabaseUrl, supabaseKey } = context;
+    
+    // Create Supabase client
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    try {
+      // Query the parts table for all dxf_url values
+      const { data, error } = await supabase
+        .from('parts')
+        .select('dxf_url')
+        .not('dxf_url', 'is', null); // Filter out null values
+      
+      if (error) {
+        throw new Error(`Supabase query error: ${error.message}`);
+      }
+      
+      if (!data) {
+        return {
+          dxfFilesUrls: [],
+          count: 0,
+        };
+      }
+      
+      // Extract DXF files URLs from the response
+      const dxfFilesUrls = data
+        .map((row: { dxf_url: string }) => row.dxf_url)
+        .filter((url: string) => url && url.trim() !== ''); // Remove empty strings
+      
+      return {
+        dxfFilesUrls,
+        count: dxfFilesUrls.length,
+      };
+      
+    } catch (error) {
+      throw new Error(`Failed to fetch DXF files URLs: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  },
+});
+
 const fetchDxfUrls = async (supabaseUrl: string, supabaseKey: string) => {
   // Create Supabase client
   const supabase = createClient(supabaseUrl, supabaseKey);
@@ -115,6 +166,73 @@ export const uploadDxfToSupabaseTool = createTool({
       
     } catch (error) {
       console.error('Error uploading DXF to Supabase:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
+    }
+  },
+});
+
+export const updatePartDxfUrlTool = createTool({
+  id: 'update-part-dxf-url',
+  description: 'Updates the dxf_url column in the parts table for a specific STEP file',
+  inputSchema: z.object({
+    supabaseUrl: z.string().describe('Supabase project URL'),
+    supabaseKey: z.string().describe('Supabase anon key'),
+    stepFilename: z.string().describe('STEP filename to match in the parts table'),
+    dxfUrl: z.string().describe('DXF file URL to store in the dxf_url column'),
+  }),
+  outputSchema: z.object({
+    success: z.boolean(),
+    updatedPartId: z.number().optional().describe('ID of the updated part'),
+    error: z.string().optional(),
+  }),
+  execute: async ({ context }) => {
+    const { supabaseUrl, supabaseKey, stepFilename, dxfUrl } = context;
+    
+    // Create Supabase client
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    try {
+      // First, find the part with matching STEP filename
+      // Assuming the STEP filename is stored in a column like 'step_file' or 'filename'
+      // You may need to adjust the column name based on your table schema
+      const { data: parts, error: selectError } = await supabase
+        .from('parts')
+        .select('id')
+        .or(`step_file.eq.${stepFilename},filename.eq.${stepFilename},name.eq.${stepFilename}`)
+        .limit(1);
+      
+      if (selectError) {
+        throw new Error(`Failed to find part: ${selectError.message}`);
+      }
+      
+      if (!parts || parts.length === 0) {
+        throw new Error(`No part found with STEP filename: ${stepFilename}`);
+      }
+      
+      const partId = parts[0].id;
+      
+      // Update the dxf_url column with the new URL
+      const { error: updateError } = await supabase
+        .from('parts')
+        .update({ dxf_url: dxfUrl })
+        .eq('id', partId);
+      
+      if (updateError) {
+        throw new Error(`Failed to update part: ${updateError.message}`);
+      }
+      
+      console.log(`✅ Updated part ${partId} with DXF URL: ${dxfUrl}`);
+      
+      return {
+        success: true,
+        updatedPartId: partId,
+      };
+      
+    } catch (error) {
+      console.error('Error updating part DXF URL:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error occurred',

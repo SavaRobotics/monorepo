@@ -37,6 +37,20 @@ def unfold_step():
         
         logger.info(f"Processing STEP file from URL: {step_url}")
         
+        # Extract original filename from URL
+        parsed_url = urllib.parse.urlparse(step_url)
+        original_filename = os.path.basename(parsed_url.path)
+        
+        # Generate output filename by changing extension to .dxf
+        if original_filename:
+            base_name = os.path.splitext(original_filename)[0]
+            output_filename = f"{base_name}.dxf"
+        else:
+            # Fallback if we can't extract filename from URL
+            output_filename = "unfolded.dxf"
+        
+        logger.info(f"Output filename will be: {output_filename}")
+        
         # Create temporary directory
         with tempfile.TemporaryDirectory() as temp_dir:
             # Download the STEP file
@@ -90,13 +104,13 @@ def unfold_step():
             
             # Return the first DXF file found (typically 'largest_face.dxf')
             output_path = output_files[0]
-            logger.info(f"Returning unfolded DXF: {os.path.basename(output_path)}")
+            logger.info(f"Returning unfolded DXF: {os.path.basename(output_path)} as {output_filename}")
             
             return send_file(
                 output_path,
                 mimetype='application/dxf',
                 as_attachment=True,
-                download_name='unfolded.dxf'
+                download_name=output_filename
             )
             
     except Exception as e:
