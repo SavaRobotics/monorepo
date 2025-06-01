@@ -100,3 +100,9 @@ function getWeatherCondition(code: number): string {
   };
   return conditions[code] || 'Unknown';
 }
+
+// Export Supabase tools
+export { getDxfUrlsTool } from './supabase';
+
+// Export nesting tools
+export { dxfNestingTool } from './nesting/nester';
