@@ -2,6 +2,7 @@ import { anthropic } from '@ai-sdk/anthropic';
 import { generateText } from 'ai';
 import { createStep, createWorkflow } from '@mastra/core/workflows';
 import { RuntimeContext } from '@mastra/core/di';
+import { Agent } from '@mastra/core/agent';
 import { z } from 'zod';
 import { dockerUnfoldTool } from '../tools/unfolder/docker-unfold-tool';
 import { uploadDxfToSupabaseTool, uploadNestedDxfToSupabaseTool, updatePartDxfUrlTool, getAllDxfFilesUrlsTool } from '../tools/supabase';
@@ -10,6 +11,64 @@ import fs from 'fs/promises';
 import path from 'path';
 
 const llm = anthropic('claude-3-5-sonnet-20240620');
+
+// Create an analysis agent that will comment on workflow progress
+const analysisAgent = new Agent({
+  name: 'workflow-analyst',
+  instructions: `You are a technical analyst observing a CAD-to-manufacturing workflow. 
+  Your job is to provide concise, insightful commentary on each step's input, output, and what's happening.
+  Focus on:
+  - Technical accuracy and quality assessment
+  - Potential issues or improvements
+  - Manufacturing considerations
+  - Progress tracking
+  - Data transformation quality
+  
+  Keep your analysis brief but informative (2-3 sentences max per comment).`,
+  model: llm,
+});
+
+// Analysis step for initial input
+const analyzeWorkflowInput = createStep({
+  id: 'analyze-workflow-input',
+  description: 'Analyzes the initial workflow input and provides commentary',
+  inputSchema: z.object({
+    cadFileUrl: z.string().url().describe('URL to the STEP/CAD file'),
+    kFactor: z.number().min(0.01).max(0.1).optional().default(0.038).describe('K-factor for sheet metal'),
+    outputFormat: z.enum(['dxf', 'step', 'both']).optional().default('dxf').describe('Output format'),
+    bendRadius: z.number().positive().optional().describe('Bend radius in mm'),
+  }),
+  outputSchema: z.object({
+    cadFileUrl: z.string().url().describe('URL to the STEP/CAD file'),
+    kFactor: z.number().min(0.01).max(0.1).optional().default(0.038).describe('K-factor for sheet metal'),
+    outputFormat: z.enum(['dxf', 'step', 'both']).optional().default('dxf').describe('Output format'),
+    bendRadius: z.number().positive().optional().describe('Bend radius in mm'),
+    analysis: z.string(),
+  }),
+  execute: async ({ inputData }) => {
+    console.log('🤔 Agent analyzing workflow input...');
+    
+    const analysis = await analysisAgent.generate([
+      {
+        role: 'user',
+        content: `Analyze this CAD unfold workflow input:
+        - CAD File URL: ${inputData.cadFileUrl}
+        - K-Factor: ${inputData.kFactor || 'default (0.038)'}
+        - Output Format: ${inputData.outputFormat || 'dxf'}
+        - Bend Radius: ${inputData.bendRadius || 'not specified'}
+        
+        Provide a technical assessment of these parameters and what to expect.`
+      }
+    ]);
+
+    console.log('📝 Input Analysis:', analysis.text);
+
+    return {
+      ...inputData,
+      analysis: analysis.text,
+    };
+  },
+});
 
 // Docker unfold execution step
 const executeUnfold = createStep({
@@ -20,6 +79,7 @@ const executeUnfold = createStep({
     kFactor: z.number().min(0.01).max(0.1).optional().default(0.038).describe('K-factor for sheet metal'),
     outputFormat: z.enum(['dxf', 'step', 'both']).optional().default('dxf').describe('Output format'),
     bendRadius: z.number().positive().optional().describe('Bend radius in mm'),
+    analysis: z.string(),
   }),
   outputSchema: z.object({
     unfoldResult: z.object({
@@ -102,6 +162,7 @@ const saveDxfToSupabase = createStep({
     }),
     processingNotes: z.string(),
     cadFileUrl: z.string().url(),
+    unfoldAnalysis: z.string(),
   }),
   outputSchema: z.object({
     unfoldResult: z.object({
@@ -118,13 +179,14 @@ const saveDxfToSupabase = createStep({
     supabaseUrl: z.string().optional(),
     supabaseUploadSuccess: z.boolean(),
     cadFileUrl: z.string().url(),
+    unfoldAnalysis: z.string(),
   }),
   execute: async ({ inputData }) => {
     if (!inputData) {
       throw new Error('Input data not found');
     }
 
-    const { unfoldResult, processingNotes, cadFileUrl } = inputData;
+    const { unfoldResult, processingNotes, cadFileUrl, unfoldAnalysis } = inputData;
     let supabaseUrl: string | undefined;
     let uploadSuccess = false;
 
@@ -159,7 +221,6 @@ const saveDxfToSupabase = createStep({
             supabaseUrl = uploadResult.publicUrl;
             uploadSuccess = true;
             console.log(`✅ DXF uploaded to Supabase: ${supabaseUrl}`);
-            console.log(`📏 File size: ${Math.round(dxfFile.content.length / 1024)}KB`);
           } else {
             console.error(`❌ Failed to upload to Supabase: ${uploadResult.error}`);
           }
@@ -175,6 +236,7 @@ const saveDxfToSupabase = createStep({
       supabaseUrl,
       supabaseUploadSuccess: uploadSuccess,
       cadFileUrl,
+      unfoldAnalysis,
     };
   },
 });
@@ -198,6 +260,7 @@ const updatePartsTableWithDxf = createStep({
     supabaseUrl: z.string().optional(),
     supabaseUploadSuccess: z.boolean(),
     cadFileUrl: z.string().url().describe('Original CAD file URL'),
+    unfoldAnalysis: z.string(),
   }),
   outputSchema: z.object({
     unfoldResult: z.object({
@@ -215,13 +278,14 @@ const updatePartsTableWithDxf = createStep({
     supabaseUploadSuccess: z.boolean(),
     partsTableUpdateSuccess: z.boolean(),
     updatedPartId: z.number().optional(),
+    unfoldAnalysis: z.string(),
   }),
   execute: async ({ inputData }) => {
     if (!inputData) {
       throw new Error('Input data not found');
     }
 
-    const { unfoldResult, processingNotes, supabaseUrl, supabaseUploadSuccess, cadFileUrl } = inputData;
+    const { unfoldResult, processingNotes, supabaseUrl, supabaseUploadSuccess, cadFileUrl, unfoldAnalysis } = inputData;
     let partsTableUpdateSuccess = false;
     let updatedPartId: number | undefined;
 
@@ -270,6 +334,7 @@ const updatePartsTableWithDxf = createStep({
       supabaseUploadSuccess,
       partsTableUpdateSuccess,
       updatedPartId,
+      unfoldAnalysis,
     };
   },
 });
@@ -294,6 +359,7 @@ const getAllDxfFilesUrls = createStep({
     supabaseUploadSuccess: z.boolean(),
     partsTableUpdateSuccess: z.boolean(),
     updatedPartId: z.number().optional(),
+    unfoldAnalysis: z.string(),
   }),
   outputSchema: z.object({
     unfoldResult: z.object({
@@ -313,13 +379,14 @@ const getAllDxfFilesUrls = createStep({
     updatedPartId: z.number().optional(),
     dxfFilesUrls: z.array(z.string()).describe('All DXF files URLs from parts table'),
     dxfFilesCount: z.number().describe('Total count of DXF files'),
+    unfoldAnalysis: z.string(),
   }),
   execute: async ({ inputData }) => {
     if (!inputData) {
       throw new Error('Input data not found');
     }
 
-    const { unfoldResult, processingNotes, supabaseUrl, supabaseUploadSuccess, partsTableUpdateSuccess, updatedPartId } = inputData;
+    const { unfoldResult, processingNotes, supabaseUrl, supabaseUploadSuccess, partsTableUpdateSuccess, updatedPartId, unfoldAnalysis } = inputData;
     let dxfFilesUrls: string[] = [];
     let dxfFilesCount = 0;
 
@@ -364,11 +431,12 @@ const getAllDxfFilesUrls = createStep({
       updatedPartId,
       dxfFilesUrls,
       dxfFilesCount,
+      unfoldAnalysis,
     };
   },
 });
 
-// Call nester Docker container step
+// Call nester Docker container step - update to handle databaseAnalysis
 const callNesterDocker = createStep({
   id: 'call-nester-docker',
   description: 'Calls the nester Docker container with DXF URLs to get nested DXF',
@@ -390,6 +458,7 @@ const callNesterDocker = createStep({
     updatedPartId: z.number().optional(),
     dxfFilesUrls: z.array(z.string()).describe('All DXF files URLs from parts table'),
     dxfFilesCount: z.number().describe('Total count of DXF files'),
+    databaseAnalysis: z.string(),
   }),
   outputSchema: z.object({
     unfoldResult: z.object({
@@ -411,13 +480,14 @@ const callNesterDocker = createStep({
     dxfFilesCount: z.number(),
     nestedDxfContent: z.string().optional().describe('Raw content of the nested DXF file'),
     nestedDxfSuccess: z.boolean(),
+    databaseAnalysis: z.string(),
   }),
   execute: async ({ inputData }) => {
     if (!inputData) {
       throw new Error('Input data not found');
     }
 
-    const { unfoldResult, processingNotes, supabaseUrl, supabaseUploadSuccess, partsTableUpdateSuccess, updatedPartId, dxfFilesUrls, dxfFilesCount } = inputData;
+    const { unfoldResult, processingNotes, supabaseUrl, supabaseUploadSuccess, partsTableUpdateSuccess, updatedPartId, dxfFilesUrls, dxfFilesCount, databaseAnalysis } = inputData;
     let nestedDxfContent: string | undefined;
     let nestedDxfSuccess = false;
 
@@ -466,11 +536,12 @@ const callNesterDocker = createStep({
       dxfFilesCount,
       nestedDxfContent,
       nestedDxfSuccess,
+      databaseAnalysis,
     };
   },
 });
 
-// Upload nested DXF to Supabase step
+// Upload nested DXF to Supabase step - update to handle databaseAnalysis
 const uploadNestedDxfToSupabaseStep = createStep({
   id: 'upload-nested-dxf-to-supabase-step',
   description: 'Uploads the nested DXF file to Supabase storage in the nested folder',
@@ -494,6 +565,7 @@ const uploadNestedDxfToSupabaseStep = createStep({
     dxfFilesCount: z.number(),
     nestedDxfContent: z.string().optional(),
     nestedDxfSuccess: z.boolean(),
+    databaseAnalysis: z.string(),
   }),
   outputSchema: z.object({
     unfoldResult: z.object({
@@ -517,6 +589,7 @@ const uploadNestedDxfToSupabaseStep = createStep({
     nestedDxfSuccess: z.boolean(),
     nestedDxfUrl: z.string().optional(),
     nestedDxfUploadSuccess: z.boolean(),
+    databaseAnalysis: z.string(),
   }),
   execute: async ({ inputData }) => {
     if (!inputData) {
@@ -533,7 +606,8 @@ const uploadNestedDxfToSupabaseStep = createStep({
       dxfFilesUrls, 
       dxfFilesCount,
       nestedDxfContent,
-      nestedDxfSuccess
+      nestedDxfSuccess,
+      databaseAnalysis
     } = inputData;
     
     let nestedDxfUrl: string | undefined;
@@ -604,11 +678,12 @@ const uploadNestedDxfToSupabaseStep = createStep({
       nestedDxfSuccess,
       nestedDxfUrl,
       nestedDxfUploadSuccess,
+      databaseAnalysis,
     };
   },
 });
 
-// Generate G-code from nested DXF step
+// Update Generate G-code step to handle nestingAnalysis
 const generateGcodeFromNestedDxf = createStep({
   id: 'generate-gcode-from-nested-dxf',
   description: 'Generates G-code from the nested DXF file using the G-code generation API',
@@ -634,6 +709,7 @@ const generateGcodeFromNestedDxf = createStep({
     nestedDxfSuccess: z.boolean(),
     nestedDxfUrl: z.string().optional(),
     nestedDxfUploadSuccess: z.boolean(),
+    nestingAnalysis: z.string(),
   }),
   outputSchema: z.object({
     unfoldResult: z.object({
@@ -660,6 +736,7 @@ const generateGcodeFromNestedDxf = createStep({
     gcodeContent: z.string().optional(),
     gcodeFilename: z.string().optional(),
     gcodeGenerationSuccess: z.boolean(),
+    nestingAnalysis: z.string(),
   }),
   execute: async ({ inputData }) => {
     if (!inputData) {
@@ -678,7 +755,8 @@ const generateGcodeFromNestedDxf = createStep({
       nestedDxfContent,
       nestedDxfSuccess,
       nestedDxfUrl,
-      nestedDxfUploadSuccess
+      nestedDxfUploadSuccess,
+      nestingAnalysis
     } = inputData;
     
     let gcodeContent: string | undefined;
@@ -763,11 +841,12 @@ const generateGcodeFromNestedDxf = createStep({
       gcodeContent,
       gcodeFilename,
       gcodeGenerationSuccess,
+      nestingAnalysis,
     };
   },
 });
 
-// Upload G-code to Supabase step
+// Upload G-code to Supabase step - update to handle nestingAnalysis
 const uploadGcodeToSupabase = createStep({
   id: 'upload-gcode-to-supabase',
   description: 'Uploads the generated G-code file to Supabase gcodefiles bucket',
@@ -796,6 +875,7 @@ const uploadGcodeToSupabase = createStep({
     gcodeContent: z.string().optional(),
     gcodeFilename: z.string().optional(),
     gcodeGenerationSuccess: z.boolean(),
+    nestingAnalysis: z.string(),
   }),
   outputSchema: z.object({
     unfoldResult: z.object({
@@ -824,6 +904,7 @@ const uploadGcodeToSupabase = createStep({
     gcodeGenerationSuccess: z.boolean(),
     gcodeUrl: z.string().optional(),
     gcodeUploadSuccess: z.boolean(),
+    nestingAnalysis: z.string(),
   }),
   execute: async ({ inputData }) => {
     if (!inputData) {
@@ -845,7 +926,8 @@ const uploadGcodeToSupabase = createStep({
       nestedDxfUploadSuccess,
       gcodeContent,
       gcodeFilename,
-      gcodeGenerationSuccess
+      gcodeGenerationSuccess,
+      nestingAnalysis
     } = inputData;
     
     let gcodeUrl: string | undefined;
@@ -919,14 +1001,15 @@ const uploadGcodeToSupabase = createStep({
       gcodeGenerationSuccess,
       gcodeUrl,
       gcodeUploadSuccess,
+      nestingAnalysis,
     };
   },
 });
 
-// Upload DXF to Supabase step
-const uploadDxfToSupabase = createStep({
-  id: 'upload-dxf-to-supabase',
-  description: 'Uploads the DXF file to Supabase storage',
+// Analysis step for unfold results
+const analyzeUnfoldResults = createStep({
+  id: 'analyze-unfold-results',
+  description: 'Analyzes the unfold operation results',
   inputSchema: z.object({
     unfoldResult: z.object({
       success: z.boolean(),
@@ -939,7 +1022,7 @@ const uploadDxfToSupabase = createStep({
       processingTime: z.number(),
     }),
     processingNotes: z.string(),
-    savedFilePath: z.string().optional(),
+    cadFileUrl: z.string().url(),
   }),
   outputSchema: z.object({
     unfoldResult: z.object({
@@ -953,185 +1036,43 @@ const uploadDxfToSupabase = createStep({
       processingTime: z.number(),
     }),
     processingNotes: z.string(),
-    savedFilePath: z.string().optional(),
-    supabaseUrl: z.string().optional(),
-    supabaseUploadSuccess: z.boolean(),
+    cadFileUrl: z.string().url(),
+    unfoldAnalysis: z.string(),
   }),
   execute: async ({ inputData }) => {
-    if (!inputData) {
-      throw new Error('Input data not found');
-    }
-
-    const { unfoldResult, processingNotes, savedFilePath } = inputData;
-    let supabaseUrl: string | undefined;
-    let uploadSuccess = false;
-
-    // Upload DXF file to Supabase if unfold was successful
-    if (unfoldResult.success && unfoldResult.outputFiles.length > 0) {
-      // Find the DXF file
-      const dxfFile = unfoldResult.outputFiles.find(file => 
-        file.mimeType === 'application/dxf' || file.filename.endsWith('.dxf')
-      );
-
-      if (dxfFile) {
-        try {
-          // Get Supabase credentials from environment variables
-          const supabaseProjectUrl = process.env.SUPABASE_URL || 'https://pynaxyfwywlqfvtjbtuc.supabase.co';
-          const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5bmF4eWZ3eXdscWZ2dGpidHVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwNzYxNiwiZXhwIjoyMDYzNzgzNjE2fQ.2jv211NlxOdDcbtE6GxGl7kg38JxvwWZx1sPz9HtzBg';
-
-          console.log('📤 Uploading DXF to Supabase...');
-          
-          // Execute the upload tool
-          const uploadResult = await uploadDxfToSupabaseTool.execute({
-            context: {
-              supabaseUrl: supabaseProjectUrl,
-              supabaseKey: supabaseKey,
-              dxfContent: dxfFile.content,
-              filename: dxfFile.filename,
-              bucketName: 'dxffiles',
-            },
-            runtimeContext: new RuntimeContext(),
-          });
-
-          if (uploadResult.success && uploadResult.publicUrl) {
-            supabaseUrl = uploadResult.publicUrl;
-            uploadSuccess = true;
-            console.log(`✅ DXF uploaded to Supabase: ${supabaseUrl}`);
-          } else {
-            console.error(`❌ Failed to upload to Supabase: ${uploadResult.error}`);
-          }
-        } catch (error) {
-          console.error(`❌ Error uploading to Supabase: ${error}`);
-        }
-      }
-    }
-
-    return {
-      unfoldResult,
-      processingNotes: processingNotes + (supabaseUrl ? `\n☁️ Uploaded to Supabase: ${supabaseUrl}` : ''),
-      savedFilePath,
-      supabaseUrl,
-      supabaseUploadSuccess: uploadSuccess,
-    };
-  },
-});
-
-// Nest DXF files step
-const nestDxfFiles = createStep({
-  id: 'nest-dxf-files',
-  description: 'Nests multiple DXF files using the nesting API',
-  inputSchema: z.object({
-    unfoldResult: z.object({
-      success: z.boolean(),
-      outputFiles: z.array(z.object({
-        filename: z.string(),
-        content: z.string(),
-        mimeType: z.string(),
-      })),
-      logs: z.string(),
-      processingTime: z.number(),
-    }),
-    processingNotes: z.string(),
-    savedFilePath: z.string().optional(),
-    supabaseUrl: z.string().optional(),
-    supabaseUploadSuccess: z.boolean(),
-  }),
-  outputSchema: z.object({
-    unfoldResult: z.object({
-      success: z.boolean(),
-      outputFiles: z.array(z.object({
-        filename: z.string(),
-        content: z.string(),
-        mimeType: z.string(),
-      })),
-      logs: z.string(),
-      processingTime: z.number(),
-    }),
-    processingNotes: z.string(),
-    savedFilePath: z.string().optional(),
-    supabaseUrl: z.string().optional(),
-    supabaseUploadSuccess: z.boolean(),
-    nestingResult: z.object({
-      success: z.boolean(),
-      nestedDxfUrl: z.string().url().optional(),
-      utilization: z.number().optional(),
-      placedParts: z.number().optional(),
-      totalParts: z.number().optional(),
-      message: z.string(),
-      error: z.string().optional(),
-      processingTime: z.number().optional(),
-    }).optional(),
-  }),
-  execute: async ({ inputData }) => {
-    if (!inputData) {
-      throw new Error('Input data not found');
-    }
-
-    const { unfoldResult, processingNotes, savedFilePath, supabaseUrl, supabaseUploadSuccess } = inputData;
-    let nestingResult = undefined;
-
-    // If we have a successful upload to Supabase, we can nest it
-    if (supabaseUploadSuccess && supabaseUrl) {
-      try {
-        console.log('🔧 Starting DXF nesting process...');
+    console.log('🤔 Agent analyzing unfold results...');
+    
+    const { unfoldResult } = inputData;
+    
+    const analysis = await analysisAgent.generate([
+      {
+        role: 'user',
+        content: `Analyze these CAD unfold results:
+        - Success: ${unfoldResult.success}
+        - Processing Time: ${(unfoldResult.processingTime / 1000).toFixed(2)} seconds
+        - Output Files: ${unfoldResult.outputFiles.length} files
+        - File Details: ${unfoldResult.outputFiles.map(f => `${f.filename} (${Math.round(f.content.length / 1024)}KB)`).join(', ')}
+        - Logs: ${unfoldResult.logs}
         
-        // For demonstration, nest the uploaded DXF with itself
-        // In a real scenario, you might collect multiple DXF URLs from different parts
-        const dxfUrls = [supabaseUrl];
-        
-        // You could also add example URLs to nest multiple parts:
-        // const dxfUrls = [
-        //   supabaseUrl,
-        //   'https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/dxffiles//part_43.dxf',
-        //   'https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/dxffiles//part_45.dxf'
-        // ];
-
-        // Execute the nesting tool
-        nestingResult = await nestDxfTool.execute({
-          context: {
-            dxfUrls: dxfUrls,
-            sheetWidth: 1000,  // 1000mm sheet width
-            sheetHeight: 500,  // 500mm sheet height
-            spacing: 2,        // 2mm spacing between parts
-          },
-          runtimeContext: new RuntimeContext(),
-        });
-
-        if (nestingResult.success) {
-          console.log(`✅ Nesting completed successfully`);
-          if (nestingResult.nestedDxfUrl) {
-            console.log(`📐 Nested DXF URL: ${nestingResult.nestedDxfUrl}`);
-          }
-          if (nestingResult.utilization !== undefined) {
-            console.log(`📊 Sheet utilization: ${nestingResult.utilization}%`);
-          }
-        } else {
-          console.error(`❌ Nesting failed: ${nestingResult.error}`);
-        }
-      } catch (error) {
-        console.error(`❌ Error during nesting: ${error}`);
+        Assess the quality and success of this unfold operation. What does this tell us about the CAD file and process?`
       }
-    }
+    ]);
+
+    console.log('📝 Unfold Analysis:', analysis.text);
 
     return {
-      unfoldResult,
-      processingNotes: processingNotes + 
-        (nestingResult?.success 
-          ? `\n\n🔧 Nesting Results:\n• Success: ✅\n• Utilization: ${nestingResult.utilization}%\n• Placed parts: ${nestingResult.placedParts}/${nestingResult.totalParts}\n` +
-            (nestingResult.nestedDxfUrl ? `• Nested DXF: ${nestingResult.nestedDxfUrl}` : '')
-          : ''),
-      savedFilePath,
-      supabaseUrl,
-      supabaseUploadSuccess,
-      nestingResult,
+      unfoldResult: inputData.unfoldResult,
+      processingNotes: inputData.processingNotes,
+      cadFileUrl: inputData.cadFileUrl,
+      unfoldAnalysis: analysis.text,
     };
   },
 });
 
-// Upload nested DXF to Supabase step
-const uploadNestedDxfToSupabase = createStep({
-  id: 'upload-nested-dxf-to-supabase',
-  description: 'Uploads the nested DXF file to Supabase storage in the nested folder',
+// Analysis step for database operations
+const analyzeDatabaseOperations = createStep({
+  id: 'analyze-database-operations',
+  description: 'Analyzes database storage and retrieval operations',
   inputSchema: z.object({
     unfoldResult: z.object({
       success: z.boolean(),
@@ -1144,19 +1085,13 @@ const uploadNestedDxfToSupabase = createStep({
       processingTime: z.number(),
     }),
     processingNotes: z.string(),
-    savedFilePath: z.string().optional(),
     supabaseUrl: z.string().optional(),
     supabaseUploadSuccess: z.boolean(),
-    nestingResult: z.object({
-      success: z.boolean(),
-      nestedDxfUrl: z.string().url().optional(),
-      utilization: z.number().optional(),
-      placedParts: z.number().optional(),
-      totalParts: z.number().optional(),
-      message: z.string(),
-      error: z.string().optional(),
-      processingTime: z.number().optional(),
-    }).optional(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()),
+    dxfFilesCount: z.number(),
+    unfoldAnalysis: z.string(),
   }),
   outputSchema: z.object({
     unfoldResult: z.object({
@@ -1170,81 +1105,45 @@ const uploadNestedDxfToSupabase = createStep({
       processingTime: z.number(),
     }),
     processingNotes: z.string(),
-    savedFilePath: z.string().optional(),
     supabaseUrl: z.string().optional(),
     supabaseUploadSuccess: z.boolean(),
-    nestingResult: z.object({
-      success: z.boolean(),
-      nestedDxfUrl: z.string().url().optional(),
-      utilization: z.number().optional(),
-      placedParts: z.number().optional(),
-      totalParts: z.number().optional(),
-      message: z.string(),
-      error: z.string().optional(),
-      processingTime: z.number().optional(),
-    }).optional(),
-    nestedSupabaseUrl: z.string().optional(),
-    nestedSupabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()),
+    dxfFilesCount: z.number(),
+    databaseAnalysis: z.string(),
   }),
   execute: async ({ inputData }) => {
-    if (!inputData) {
-      throw new Error('Input data not found');
-    }
-
-    const { unfoldResult, processingNotes, savedFilePath, supabaseUrl, supabaseUploadSuccess, nestingResult } = inputData;
-    let nestedSupabaseUrl: string | undefined;
-    let nestedUploadSuccess = false;
-
-    // If we have a successful nesting with a nested DXF URL, upload it to Supabase
-    if (nestingResult?.success && nestingResult.nestedDxfUrl) {
-      try {
-        // Get Supabase credentials from environment variables
-        const supabaseProjectUrl = process.env.SUPABASE_URL || 'https://pynaxyfwywlqfvtjbtuc.supabase.co';
-        const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5bmF4eWZ3eXdscWZ2dGpidHVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwNzYxNiwiZXhwIjoyMDYzNzgzNjE2fQ.2jv211NlxOdDcbtE6GxGl7kg38JxvwWZx1sPz9HtzBg';
-
-        console.log('📤 Uploading nested DXF to Supabase...');
+    console.log('🤔 Agent analyzing database operations...');
+    
+    const analysis = await analysisAgent.generate([
+      {
+        role: 'user',
+        content: `Analyze these database operations:
+        - Supabase Upload Success: ${inputData.supabaseUploadSuccess}
+        - Supabase URL: ${inputData.supabaseUrl || 'none'}
+        - Parts Table Update Success: ${inputData.partsTableUpdateSuccess}
+        - Updated Part ID: ${inputData.updatedPartId || 'none'}
+        - Total DXF Files in Database: ${inputData.dxfFilesCount}
+        - DXF Files URLs: ${inputData.dxfFilesUrls.length} files
         
-        // Execute the upload tool
-        const uploadResult = await uploadNestedDxfToSupabaseTool.execute({
-          context: {
-            supabaseUrl: supabaseProjectUrl,
-            supabaseKey: supabaseKey,
-            nestedDxfUrl: nestingResult.nestedDxfUrl,
-            bucketName: 'dxffiles',
-          },
-          runtimeContext: new RuntimeContext(),
-        });
-
-        if (uploadResult.success && uploadResult.publicUrl) {
-          nestedSupabaseUrl = uploadResult.publicUrl;
-          nestedUploadSuccess = true;
-          console.log(`✅ Nested DXF uploaded to Supabase: ${nestedSupabaseUrl}`);
-        } else {
-          console.error(`❌ Failed to upload nested DXF to Supabase: ${uploadResult.error}`);
-        }
-      } catch (error) {
-        console.error(`❌ Error uploading nested DXF to Supabase: ${error}`);
+        Assess the database operations. Are we building a good manufacturing database? Any concerns?`
       }
-    }
+    ]);
+
+    console.log('📝 Database Analysis:', analysis.text);
 
     return {
-      unfoldResult,
-      processingNotes: processingNotes + 
-        (nestedSupabaseUrl ? `\n☁️ Nested DXF uploaded to Supabase: ${nestedSupabaseUrl}` : ''),
-      savedFilePath,
-      supabaseUrl,
-      supabaseUploadSuccess,
-      nestingResult,
-      nestedSupabaseUrl,
-      nestedSupabaseUploadSuccess: nestedUploadSuccess,
+      ...inputData,
+      databaseAnalysis: analysis.text,
     };
   },
 });
 
-// Analysis step using direct LLM call
-const analyzeResults = createStep({
-  id: 'analyze-results',
-  description: 'Analyzes unfold results and provides manufacturing insights',
+// Analysis step for nesting operations
+const analyzeNestingResults = createStep({
+  id: 'analyze-nesting-results',
+  description: 'Analyzes the nesting operation results',
   inputSchema: z.object({
     unfoldResult: z.object({
       success: z.boolean(),
@@ -1257,94 +1156,73 @@ const analyzeResults = createStep({
       processingTime: z.number(),
     }),
     processingNotes: z.string(),
-    savedFilePath: z.string().optional(),
     supabaseUrl: z.string().optional(),
     supabaseUploadSuccess: z.boolean(),
-    nestingResult: z.object({
-      success: z.boolean(),
-      nestedDxfUrl: z.string().url().optional(),
-      utilization: z.number().optional(),
-      placedParts: z.number().optional(),
-      totalParts: z.number().optional(),
-      message: z.string(),
-      error: z.string().optional(),
-      processingTime: z.number().optional(),
-    }).optional(),
-    nestedSupabaseUrl: z.string().optional(),
-    nestedSupabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()),
+    dxfFilesCount: z.number(),
+    nestedDxfContent: z.string().optional(),
+    nestedDxfSuccess: z.boolean(),
+    nestedDxfUrl: z.string().optional(),
+    nestedDxfUploadSuccess: z.boolean(),
+    databaseAnalysis: z.string(),
   }),
   outputSchema: z.object({
-    analysis: z.string(),
-    recommendations: z.string(),
-    dxfContent: z.string().optional(),
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()),
+    dxfFilesCount: z.number(),
+    nestedDxfContent: z.string().optional(),
+    nestedDxfSuccess: z.boolean(),
+    nestedDxfUrl: z.string().optional(),
+    nestedDxfUploadSuccess: z.boolean(),
+    nestingAnalysis: z.string(),
   }),
   execute: async ({ inputData }) => {
-    if (!inputData) {
-      throw new Error('Input data not found');
-    }
+    console.log('🤔 Agent analyzing nesting results...');
+    
+    const analysis = await analysisAgent.generate([
+      {
+        role: 'user',
+        content: `Analyze these nesting operation results:
+        - Nesting Success: ${inputData.nestedDxfSuccess}
+        - Input Files Count: ${inputData.dxfFilesCount}
+        - Nested DXF Size: ${inputData.nestedDxfContent ? Math.round(inputData.nestedDxfContent.length / 1024) + 'KB' : 'none'}
+        - Nested DXF Upload Success: ${inputData.nestedDxfUploadSuccess}
+        - Nested DXF URL: ${inputData.nestedDxfUrl || 'none'}
+        
+        Assess the nesting efficiency and optimization. How well did the algorithm pack the parts?`
+      }
+    ]);
 
-    const { unfoldResult, processingNotes, savedFilePath, nestingResult } = inputData;
-
-    // Extract DXF content if available
-    const dxfFile = unfoldResult.outputFiles.find(file => file.mimeType === "application/dxf");
-    const dxfContent = dxfFile ? dxfFile.content : null;
-
-    const prompt = `Analyze these CAD unfold and nesting results:
-
-UNFOLD RESULTS:
-Status: ${unfoldResult.success ? 'SUCCESS' : 'FAILED'}
-Processing Time: ${(unfoldResult.processingTime / 1000).toFixed(2)} seconds
-Output Files: ${unfoldResult.outputFiles.length} files
-
-${unfoldResult.outputFiles.map((file, i) => 
-  `${i + 1}. ${file.filename} (${file.mimeType}, ${Math.round(file.content.length / 1024)}KB)`
-).join('\n')}
-
-${dxfContent ? `DXF Preview: ${dxfContent.substring(0, 200)}...` : 'No DXF content'}
-
-Logs: ${unfoldResult.logs}
-
-${nestingResult ? `
-NESTING RESULTS:
-Status: ${nestingResult.success ? 'SUCCESS' : 'FAILED'}
-${nestingResult.utilization ? `Sheet Utilization: ${nestingResult.utilization}%` : ''}
-${nestingResult.placedParts ? `Parts Placed: ${nestingResult.placedParts}/${nestingResult.totalParts}` : ''}
-${nestingResult.nestedDxfUrl ? `Nested DXF URL: ${nestingResult.nestedDxfUrl}` : ''}
-${nestingResult.error ? `Error: ${nestingResult.error}` : ''}
-` : 'No nesting performed'}
-
-Provide a brief analysis of what was generated and any manufacturing recommendations.`;
-
-    // Direct LLM call without agent
-    const result = await generateText({
-      model: llm,
-      prompt: prompt,
-    });
-
-    // Extract recommendations (simplified - you could make this more sophisticated)
-    const recommendationsMatch = result.text.match(/💡 NEXT STEPS\s*\n([\s\S]*?)(?=\n\n|$)/);
-    const recommendations = recommendationsMatch ? recommendationsMatch[1].trim() : 'No specific recommendations provided.';
+    console.log('📝 Nesting Analysis:', analysis.text);
 
     return {
-      analysis: result.text,
-      recommendations,
-      dxfContent: dxfContent || undefined,
+      ...inputData,
+      nestingAnalysis: analysis.text,
     };
   },
 });
 
-// Create the main CAD unfold test workflow
-const cadUnfoldTestWorkflow = createWorkflow({
-  id: 'cad-unfold-test-workflow',
-  description: 'Tests the API-based CAD unfold tool with analysis',
+// Final comprehensive analysis
+const provideFinalAnalysis = createStep({
+  id: 'provide-final-analysis',
+  description: 'Provides final comprehensive analysis of the entire workflow',
   inputSchema: z.object({
-    cadFileUrl: z.string().url().describe('URL to the STEP/CAD file to unfold'),
-    kFactor: z.number().min(0.01).max(0.1).optional().default(0.038).describe('K-factor for sheet metal unfolding'),
-    outputFormat: z.enum(['dxf', 'step', 'both']).optional().default('dxf').describe('Output format for unfolded parts'),
-    bendRadius: z.number().positive().optional().describe('Bend radius for sheet metal operations'),
-  }),
-  outputSchema: z.object({
-    // For testing the executeUnfold and saveDxfFile steps
     unfoldResult: z.object({
       success: z.boolean(),
       outputFiles: z.array(z.object({
@@ -1371,40 +1249,149 @@ const cadUnfoldTestWorkflow = createWorkflow({
     gcodeGenerationSuccess: z.boolean(),
     gcodeUrl: z.string().optional(),
     gcodeUploadSuccess: z.boolean(),
+    nestingAnalysis: z.string(),
+  }),
+  outputSchema: z.object({
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()),
+    dxfFilesCount: z.number(),
+    nestedDxfContent: z.string().optional(),
+    nestedDxfSuccess: z.boolean(),
+    nestedDxfUrl: z.string().optional(),
+    nestedDxfUploadSuccess: z.boolean(),
+    gcodeContent: z.string().optional(),
+    gcodeFilename: z.string().optional(),
+    gcodeGenerationSuccess: z.boolean(),
+    gcodeUrl: z.string().optional(),
+    gcodeUploadSuccess: z.boolean(),
+    finalAnalysis: z.string(),
+    recommendations: z.string(),
+    nestingAnalysis: z.string(),
+  }),
+  execute: async ({ inputData }) => {
+    console.log('🤔 Agent providing final comprehensive analysis...');
     
-    // Comment out the other properties for now since we're not running those steps
-    // analysis: z.string(),
-    // recommendations: z.string(),
-    // dxfContent: z.string().optional(),
-    // supabaseUrl: z.string().optional(),
-    // supabaseUploadSuccess: z.boolean(),
-    // nestingResult: z.object({
-    //   success: z.boolean(),
-    //   nestedDxfUrl: z.string().url().optional(),
-    //   utilization: z.number().optional(),
-    //   placedParts: z.number().optional(),
-    //   totalParts: z.number().optional(),
-    //   message: z.string(),
-    //   error: z.string().optional(),
-    //   processingTime: z.number().optional(),
-    // }).optional(),
-    // nestedSupabaseUrl: z.string().optional(),
-    // nestedSupabaseUploadSuccess: z.boolean(),
+    const analysis = await analysisAgent.generate([
+      {
+        role: 'user',
+        content: `Provide a comprehensive final analysis of this CAD-to-manufacturing workflow:
+
+        WORKFLOW SUMMARY:
+        - Unfold Success: ${inputData.unfoldResult.success}
+        - Files Generated: ${inputData.unfoldResult.outputFiles.length}
+        - Database Operations: Upload=${inputData.supabaseUploadSuccess}, Update=${inputData.partsTableUpdateSuccess}
+        - Nesting Success: ${inputData.nestedDxfSuccess}
+        - G-code Generation: ${inputData.gcodeGenerationSuccess}
+        - G-code Upload: ${inputData.gcodeUploadSuccess}
+        
+        DELIVERABLES:
+        - DXF File: ${inputData.supabaseUrl || 'failed'}
+        - Nested DXF: ${inputData.nestedDxfUrl || 'failed'}
+        - G-code File: ${inputData.gcodeUrl || 'failed'}
+        
+        Provide:
+        1. Overall workflow assessment (success/failure and quality)
+        2. Manufacturing readiness evaluation
+        3. Key recommendations for improvement
+        4. Next steps for production`
+      }
+    ]);
+
+    console.log('📝 Final Analysis:', analysis.text);
+
+    // Extract recommendations from the analysis
+    const recommendations = await analysisAgent.generate([
+      {
+        role: 'user',
+        content: `Based on the workflow results, provide 3-5 specific, actionable recommendations for:
+        1. Process optimization
+        2. Quality improvements
+        3. Cost reduction
+        4. Time savings
+        
+        Format as a bulleted list.`
+      }
+    ]);
+
+    console.log('💡 Recommendations:', recommendations.text);
+
+    return {
+      ...inputData,
+      finalAnalysis: analysis.text,
+      recommendations: recommendations.text,
+      nestingAnalysis: inputData.nestingAnalysis,
+    };
+  },
+});
+
+// Create the main CAD unfold test workflow
+const cadUnfoldTestWorkflow = createWorkflow({
+  id: 'cad-unfold-test-workflow',
+  description: 'Tests the API-based CAD unfold tool with comprehensive agent analysis',
+  inputSchema: z.object({
+    cadFileUrl: z.string().url().describe('URL to the STEP/CAD file to unfold'),
+    kFactor: z.number().min(0.01).max(0.1).optional().default(0.038).describe('K-factor for sheet metal unfolding'),
+    outputFormat: z.enum(['dxf', 'step', 'both']).optional().default('dxf').describe('Output format for unfolded parts'),
+    bendRadius: z.number().positive().optional().describe('Bend radius for sheet metal operations'),
+  }),
+  outputSchema: z.object({
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()),
+    dxfFilesCount: z.number(),
+    nestedDxfContent: z.string().optional(),
+    nestedDxfSuccess: z.boolean(),
+    nestedDxfUrl: z.string().optional(),
+    nestedDxfUploadSuccess: z.boolean(),
+    gcodeContent: z.string().optional(),
+    gcodeFilename: z.string().optional(),
+    gcodeGenerationSuccess: z.boolean(),
+    gcodeUrl: z.string().optional(),
+    gcodeUploadSuccess: z.boolean(),
+    finalAnalysis: z.string(),
+    recommendations: z.string(),
   }),
 })
+  .then(analyzeWorkflowInput)     // 🤔 Agent analyzes input
   .then(executeUnfold)
+  .then(analyzeUnfoldResults)     // 🤔 Agent analyzes unfold results
   .then(saveDxfToSupabase)
   .then(updatePartsTableWithDxf)
   .then(getAllDxfFilesUrls)
+  .then(analyzeDatabaseOperations) // 🤔 Agent analyzes database ops
   .then(callNesterDocker)
   .then(uploadNestedDxfToSupabaseStep)
+  .then(analyzeNestingResults)    // 🤔 Agent analyzes nesting
   .then(generateGcodeFromNestedDxf)
   .then(uploadGcodeToSupabase)
-  // Comment out the other steps for now - just testing the docker unfold and file saving
-  // .then(uploadDxfToSupabase)
-  // .then(nestDxfFiles)
-  // .then(uploadNestedDxfToSupabase)
-  // .then(analyzeResults);
+  .then(provideFinalAnalysis);    // 🤔 Agent provides final analysis
 
 cadUnfoldTestWorkflow.commit();
 

@@ -65,7 +65,7 @@ export async function getCadUnfoldInfo(formData: FormData) {
     console.log(`📊 Workflow result status: ${result.status}`);
     
     if (result.status === "success") {
-      const { analysis, recommendations, unfoldResult } = result.result || {};
+      const { unfoldResult, processingNotes } = result.result || {};
       
       let response = "🔧 CAD UNFOLD RESULTS\n";
       response += "═══════════════════════\n\n";
@@ -90,14 +90,9 @@ export async function getCadUnfoldInfo(formData: FormData) {
         }
       }
       
-      if (analysis) {
-        response += "🤖 AI ANALYSIS:\n";
-        response += analysis + "\n\n";
-      }
-      
-      if (recommendations) {
-        response += "💡 RECOMMENDATIONS:\n";
-        response += recommendations;
+      if (processingNotes) {
+        response += "📝 PROCESSING NOTES:\n";
+        response += processingNotes + "\n\n";
       }
       
       return response;
