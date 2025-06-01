@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -7,6 +7,7 @@ import shutil
 from datetime import datetime
 from typing import Optional
 import logging
+import requests
 
 from .config import (
     app_config, 
@@ -74,6 +75,102 @@ async def get_materials():
         "presets": app_config.material_presets,
         "material_types": ["plywood", "mdf", "aluminum", "acrylic", "steel", "custom"]
     }
+
+@app.get("/generate-gcode")
+async def generate_gcode_from_url(
+    background_tasks: BackgroundTasks,
+    url: str = Query(..., description="URL to the DXF file"),
+    tool_diameter: float = Query(3.175, description="Tool diameter in mm (default 1/8 inch)"),
+    feed_rate: float = Query(100, description="Feed rate in mm/min"),
+    plunge_rate: float = Query(50, description="Plunge rate in mm/min"),
+    corner_exclusion_zone: float = Query(15.0, description="Corner exclusion zone in mm")
+):
+    """Generate G-code from a DXF file URL"""
+    
+    # Generate unique filenames
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    input_filename = f"input_{timestamp}_downloaded.dxf"
+    output_filename = f"output_{timestamp}_generated.gcode"
+    
+    input_path = os.path.join(app_config.temp_dir, input_filename)
+    output_path = os.path.join(app_config.temp_dir, output_filename)
+    
+    try:
+        # Download the DXF file from URL
+        logger.info(f"Downloading DXF file from URL: {url}")
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        
+        # Save the downloaded file
+        with open(input_path, "wb") as f:
+            f.write(response.content)
+        
+        # Configure settings
+        material_config = MaterialConfig(
+            feed_rate=feed_rate,
+            plunge_rate=plunge_rate
+        )
+        
+        tool_config = ToolConfig(diameter=tool_diameter)
+        
+        tab_config = TabConfig(
+            enabled=True,
+            corner_exclusion_zone=corner_exclusion_zone
+        )
+        
+        cutting_config = CuttingConfig(
+            material=material_config,
+            tool=tool_config,
+            tabs=tab_config
+        )
+        
+        # Process DXF
+        logger.info(f"Processing DXF file: {input_filename}")
+        processor = DXFProcessor()
+        processor.load_dxf(input_path)
+        
+        if not processor.parts:
+            raise HTTPException(status_code=400, detail="No parts found in DXF file")
+        
+        # Generate toolpaths with offset
+        logger.info(f"Generating toolpaths with {tool_diameter}mm tool offset")
+        toolpath_generator = ToolpathGenerator(cutting_config)
+        toolpaths = toolpath_generator.generate_toolpaths(processor.parts)
+        
+        # Export G-code
+        logger.info("Exporting G-code")
+        exporter = GCodeExporter(cutting_config)
+        exporter.export(toolpaths, output_path)
+        
+        # Schedule cleanup
+        background_tasks.add_task(cleanup_temp_files, [input_path, output_path], delay=300)
+        
+        # Return the file
+        return FileResponse(
+            output_path,
+            media_type='text/plain',
+            filename=output_filename,
+            headers={
+                "Content-Disposition": f"attachment; filename={output_filename}"
+            }
+        )
+        
+    except requests.RequestException as e:
+        logger.error(f"Failed to download DXF file: {str(e)}")
+        # Cleanup on error
+        for path in [input_path, output_path]:
+            if os.path.exists(path):
+                os.remove(path)
+        raise HTTPException(status_code=400, detail=f"Failed to download DXF file: {str(e)}")
+        
+    except Exception as e:
+        logger.error(f"Conversion error: {str(e)}")
+        # Cleanup on error
+        for path in [input_path, output_path]:
+            if os.path.exists(path):
+                os.remove(path)
+        
+        raise HTTPException(status_code=500, detail=f"Conversion failed: {str(e)}")
 
 @app.post("/validate")
 async def validate_dxf(file: UploadFile = File(...)):
@@ -405,4 +502,4 @@ def cleanup_temp_files(file_paths: list, delay: int = 0):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=9000)

@@ -427,7 +427,7 @@ const callNesterDocker = createStep({
         console.log('🔧 Calling nester Docker container...');
         
         // Construct the URL with DXF URLs as query parameter
-        const nesterUrl = `http://localhost:5002/nest?urls=${dxfFilesUrls.join(',')}`;
+        const nesterUrl = `http://127.0.0.1:5002/nest?urls=${dxfFilesUrls.join(',')}`;
         
         console.log(`📡 Request URL: ${nesterUrl}`);
         
@@ -604,6 +604,321 @@ const uploadNestedDxfToSupabaseStep = createStep({
       nestedDxfSuccess,
       nestedDxfUrl,
       nestedDxfUploadSuccess,
+    };
+  },
+});
+
+// Generate G-code from nested DXF step
+const generateGcodeFromNestedDxf = createStep({
+  id: 'generate-gcode-from-nested-dxf',
+  description: 'Generates G-code from the nested DXF file using the G-code generation API',
+  inputSchema: z.object({
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()),
+    dxfFilesCount: z.number(),
+    nestedDxfContent: z.string().optional(),
+    nestedDxfSuccess: z.boolean(),
+    nestedDxfUrl: z.string().optional(),
+    nestedDxfUploadSuccess: z.boolean(),
+  }),
+  outputSchema: z.object({
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()),
+    dxfFilesCount: z.number(),
+    nestedDxfContent: z.string().optional(),
+    nestedDxfSuccess: z.boolean(),
+    nestedDxfUrl: z.string().optional(),
+    nestedDxfUploadSuccess: z.boolean(),
+    gcodeContent: z.string().optional(),
+    gcodeFilename: z.string().optional(),
+    gcodeGenerationSuccess: z.boolean(),
+  }),
+  execute: async ({ inputData }) => {
+    if (!inputData) {
+      throw new Error('Input data not found');
+    }
+
+    const { 
+      unfoldResult, 
+      processingNotes, 
+      supabaseUrl, 
+      supabaseUploadSuccess, 
+      partsTableUpdateSuccess, 
+      updatedPartId, 
+      dxfFilesUrls, 
+      dxfFilesCount,
+      nestedDxfContent,
+      nestedDxfSuccess,
+      nestedDxfUrl,
+      nestedDxfUploadSuccess
+    } = inputData;
+    
+    let gcodeContent: string | undefined;
+    let gcodeFilename: string | undefined;
+    let gcodeGenerationSuccess = false;
+
+    // Only generate G-code if we have a nested DXF URL
+    if (nestedDxfUploadSuccess && nestedDxfUrl) {
+      try {
+        console.log('🔧 Generating G-code from nested DXF...');
+        
+        // Encode the nested DXF URL
+        const encodedUrl = encodeURIComponent(nestedDxfUrl);
+        
+        // Construct the G-code generation API URL (simplified API - only requires URL)
+        const gcodeApiUrl = `http://localhost:9000/generate-gcode?url=${encodedUrl}`;
+        
+        console.log(`📡 Request URL: ${gcodeApiUrl}`);
+        
+        // Make GET request to G-code generation API
+        const response = await fetch(gcodeApiUrl);
+        
+        if (!response.ok) {
+          // Try to get error details from JSON response
+          const contentType = response.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            const errorData = await response.json();
+            throw new Error(`G-code API error: ${response.status} - ${errorData.detail || response.statusText}`);
+          } else {
+            throw new Error(`G-code API error: ${response.status} ${response.statusText}`);
+          }
+        }
+        
+        // Get the G-code content
+        gcodeContent = await response.text();
+        
+        // Extract filename from Content-Disposition header if available
+        const contentDisposition = response.headers.get('content-disposition');
+        if (contentDisposition) {
+          const filenameMatch = contentDisposition.match(/filename=(.+)$/);
+          if (filenameMatch) {
+            gcodeFilename = filenameMatch[1].replace(/"/g, '');
+          }
+        }
+        
+        if (!gcodeFilename) {
+          // Generate a default filename if not provided
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+          gcodeFilename = `output_${timestamp}_generated.gcode`;
+        }
+        
+        gcodeGenerationSuccess = true;
+        
+        console.log(`✅ G-code generated successfully`);
+        console.log(`📏 G-code size: ${Math.round(gcodeContent.length / 1024)}KB`);
+        console.log(`📄 Filename: ${gcodeFilename}`);
+        console.log(`📐 G-code preview: ${gcodeContent.substring(0, 200)}...`);
+        
+      } catch (error) {
+        console.error(`❌ Error generating G-code: ${error}`);
+      }
+    } else {
+      console.log('⚠️ No nested DXF URL available for G-code generation');
+    }
+
+    return {
+      unfoldResult,
+      processingNotes: processingNotes + 
+        (gcodeGenerationSuccess 
+          ? `\n\n🔧 G-code Generation Results:\n• Success: ✅\n• Filename: ${gcodeFilename}\n• Size: ${Math.round((gcodeContent?.length || 0) / 1024)}KB`
+          : '\n\n🔧 G-code Generation Results:\n• Success: ❌'),
+      supabaseUrl,
+      supabaseUploadSuccess,
+      partsTableUpdateSuccess,
+      updatedPartId,
+      dxfFilesUrls,
+      dxfFilesCount,
+      nestedDxfContent,
+      nestedDxfSuccess,
+      nestedDxfUrl,
+      nestedDxfUploadSuccess,
+      gcodeContent,
+      gcodeFilename,
+      gcodeGenerationSuccess,
+    };
+  },
+});
+
+// Upload G-code to Supabase step
+const uploadGcodeToSupabase = createStep({
+  id: 'upload-gcode-to-supabase',
+  description: 'Uploads the generated G-code file to Supabase gcodefiles bucket',
+  inputSchema: z.object({
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()),
+    dxfFilesCount: z.number(),
+    nestedDxfContent: z.string().optional(),
+    nestedDxfSuccess: z.boolean(),
+    nestedDxfUrl: z.string().optional(),
+    nestedDxfUploadSuccess: z.boolean(),
+    gcodeContent: z.string().optional(),
+    gcodeFilename: z.string().optional(),
+    gcodeGenerationSuccess: z.boolean(),
+  }),
+  outputSchema: z.object({
+    unfoldResult: z.object({
+      success: z.boolean(),
+      outputFiles: z.array(z.object({
+        filename: z.string(),
+        content: z.string(),
+        mimeType: z.string(),
+      })),
+      logs: z.string(),
+      processingTime: z.number(),
+    }),
+    processingNotes: z.string(),
+    supabaseUrl: z.string().optional(),
+    supabaseUploadSuccess: z.boolean(),
+    partsTableUpdateSuccess: z.boolean(),
+    updatedPartId: z.number().optional(),
+    dxfFilesUrls: z.array(z.string()),
+    dxfFilesCount: z.number(),
+    nestedDxfContent: z.string().optional(),
+    nestedDxfSuccess: z.boolean(),
+    nestedDxfUrl: z.string().optional(),
+    nestedDxfUploadSuccess: z.boolean(),
+    gcodeContent: z.string().optional(),
+    gcodeFilename: z.string().optional(),
+    gcodeGenerationSuccess: z.boolean(),
+    gcodeUrl: z.string().optional(),
+    gcodeUploadSuccess: z.boolean(),
+  }),
+  execute: async ({ inputData }) => {
+    if (!inputData) {
+      throw new Error('Input data not found');
+    }
+
+    const { 
+      unfoldResult, 
+      processingNotes, 
+      supabaseUrl, 
+      supabaseUploadSuccess, 
+      partsTableUpdateSuccess, 
+      updatedPartId, 
+      dxfFilesUrls, 
+      dxfFilesCount,
+      nestedDxfContent,
+      nestedDxfSuccess,
+      nestedDxfUrl,
+      nestedDxfUploadSuccess,
+      gcodeContent,
+      gcodeFilename,
+      gcodeGenerationSuccess
+    } = inputData;
+    
+    let gcodeUrl: string | undefined;
+    let gcodeUploadSuccess = false;
+
+    // Only upload if we have G-code content
+    if (gcodeGenerationSuccess && gcodeContent && gcodeFilename) {
+      try {
+        // Get Supabase credentials
+        const supabaseProjectUrl = process.env.SUPABASE_URL || 'https://pynaxyfwywlqfvtjbtuc.supabase.co';
+        const supabaseKey = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5bmF4eWZ3eXdscWZ2dGpidHVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwNzYxNiwiZXhwIjoyMDYzNzgzNjE2fQ.2jv211NlxOdDcbtE6GxGl7kg38JxvwWZx1sPz9HtzBg';
+
+        console.log('📤 Uploading G-code to Supabase gcodefiles bucket...');
+        
+        // Create Supabase client
+        const { createClient } = await import('@supabase/supabase-js');
+        const supabase = createClient(supabaseProjectUrl, supabaseKey);
+        
+        // Convert string content to Blob
+        const blob = new Blob([gcodeContent], { type: 'text/plain' });
+        
+        // Upload to gcodefiles bucket
+        const { data, error } = await supabase.storage
+          .from('gcodefiles')
+          .upload(gcodeFilename, blob, {
+            contentType: 'text/plain',
+            upsert: false,
+          });
+        
+        if (error) {
+          throw new Error(`Upload failed: ${error.message}`);
+        }
+        
+        // Get the public URL
+        const { data: urlData } = supabase.storage
+          .from('gcodefiles')
+          .getPublicUrl(gcodeFilename);
+        
+        gcodeUrl = urlData.publicUrl;
+        gcodeUploadSuccess = true;
+        
+        console.log(`✅ G-code uploaded to Supabase: ${gcodeUrl}`);
+        console.log(`📏 File size: ${Math.round(gcodeContent.length / 1024)}KB`);
+        console.log(`📄 Filename: ${gcodeFilename}`);
+        
+      } catch (error) {
+        console.error(`❌ Error uploading G-code to Supabase: ${error}`);
+      }
+    } else {
+      console.log('⚠️ No G-code content available for upload');
+    }
+
+    return {
+      unfoldResult,
+      processingNotes: processingNotes + 
+        (gcodeUploadSuccess && gcodeUrl
+          ? `\n☁️ G-code uploaded to: ${gcodeUrl}`
+          : ''),
+      supabaseUrl,
+      supabaseUploadSuccess,
+      partsTableUpdateSuccess,
+      updatedPartId,
+      dxfFilesUrls,
+      dxfFilesCount,
+      nestedDxfContent,
+      nestedDxfSuccess,
+      nestedDxfUrl,
+      nestedDxfUploadSuccess,
+      gcodeContent,
+      gcodeFilename,
+      gcodeGenerationSuccess,
+      gcodeUrl,
+      gcodeUploadSuccess,
     };
   },
 });
@@ -1051,6 +1366,11 @@ const cadUnfoldTestWorkflow = createWorkflow({
     nestedDxfSuccess: z.boolean(),
     nestedDxfUrl: z.string().optional(),
     nestedDxfUploadSuccess: z.boolean(),
+    gcodeContent: z.string().optional(),
+    gcodeFilename: z.string().optional(),
+    gcodeGenerationSuccess: z.boolean(),
+    gcodeUrl: z.string().optional(),
+    gcodeUploadSuccess: z.boolean(),
     
     // Comment out the other properties for now since we're not running those steps
     // analysis: z.string(),
@@ -1078,6 +1398,8 @@ const cadUnfoldTestWorkflow = createWorkflow({
   .then(getAllDxfFilesUrls)
   .then(callNesterDocker)
   .then(uploadNestedDxfToSupabaseStep)
+  .then(generateGcodeFromNestedDxf)
+  .then(uploadGcodeToSupabase)
   // Comment out the other steps for now - just testing the docker unfold and file saving
   // .then(uploadDxfToSupabase)
   // .then(nestDxfFiles)
