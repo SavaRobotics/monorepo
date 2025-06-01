@@ -2,6 +2,7 @@
 
 # mastra
 .mastra
+mastra.db
 
 # dependencies
 /node_modules

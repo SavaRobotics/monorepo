@@ -4,9 +4,20 @@ import { mastra } from "../../src/mastra";
  
 export async function getWeatherInfo(formData: FormData) {
   const city = formData.get("city")?.toString();
-  const agent = mastra.getAgent("weatherAgent");
+  
+  if (!city) {
+    return "Please provide a city name";
+  }
  
-  const result = await agent.generate(`What's the weather like in ${city}?`);
+  const weatherWorkflow = mastra.getWorkflow("weatherWorkflow");
+  const run = weatherWorkflow.createRun();
+  const result = await run.start({ 
+    inputData: { city } 
+  });
  
-  return result.text;
+  if (result.status === "success") {
+    return result.result?.activities || "Unable to fetch weather information";
+  }
+  
+  return "Unable to fetch weather information";
 }
