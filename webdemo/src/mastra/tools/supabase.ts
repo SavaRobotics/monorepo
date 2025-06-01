@@ -51,7 +51,7 @@ export const getAllDxfFilesUrlsTool = createTool({
       if (error) {
         throw new Error(`Supabase query error: ${error.message}`);
       }
-      
+      //tes
       if (!data) {
         return {
           dxfFilesUrls: [],
