@@ -3,7 +3,7 @@ import { Agent } from '@mastra/core/agent';
 import { createStep, createWorkflow } from '@mastra/core/workflows';
 import { RuntimeContext } from '@mastra/core/di';
 import { z } from 'zod';
-import { getDxfUrlsTool, dxfNestingTool } from '../tools';
+import { getDxfUrlsTool, nestDxfTool } from '../tools';
 
 const llm = anthropic('claude-3-5-sonnet-20240620');
 
@@ -32,7 +32,7 @@ const nestingAgent = new Agent({
     - Cost and waste analysis
     When you receive nesting results, provide detailed analysis and actionable insights.
   `,
-  tools: { dxfNestingTool },
+  tools: { nestDxfTool },
 });
 
 // Step to fetch DXF URLs from Supabase
@@ -52,7 +52,9 @@ const fetchDxfUrls = createStep({
     sheetHeight: z.number(),
     spacing: z.number(),
   }),
-  execute: async ({ runtimeContext }) => {
+  execute: async ({ inputData, runtimeContext }) => {
+    const { sheetWidth, sheetHeight, spacing } = inputData;
+    
     // Get Supabase credentials from environment variables
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_KEY;
@@ -103,9 +105,9 @@ Please provide insights about:
       dxfUrls: result.dxfUrls,
       count: result.count,
       analysis: analysisText,
-      sheetWidth: 1000, // Default sheet width
-      sheetHeight: 500,  // Default sheet height  
-      spacing: 2,        // Default spacing
+      sheetWidth,
+      sheetHeight,
+      spacing,
     };
   },
 });
@@ -129,31 +131,28 @@ const nestDxfParts = createStep({
     originalAnalysis: z.string(),
     // Nesting results
     nestingResults: z.object({
-      utilization_percent: z.number(),
-      placed_count: z.number(),
-      total_parts: z.number(),
-      unfittable_count: z.number(),
-      nested_dxf_path: z.string().optional(),
+      success: z.boolean(),
+      nestedDxfUrl: z.string().optional(),
+      utilization: z.number().optional(),
+      placedParts: z.number().optional(),
+      totalParts: z.number().optional(),
       message: z.string(),
       error: z.string().optional(),
+      processingTime: z.number().optional(),
     }),
     // AI analysis of nesting results
     nestingAnalysis: z.string(),
   }),
-  execute: async ({ runtimeContext }) => {
-    // For demo purposes, using default values since step chaining has type issues
-    const dxfUrls = ['https://example.com/part1.dxf', 'https://example.com/part2.dxf']; // Will be replaced by actual step chaining
-    const sheetWidth = 1000;
-    const sheetHeight = 500;
-    const spacing = 2;
+  execute: async ({ inputData, runtimeContext }) => {
+    const { dxfUrls, count, analysis, sheetWidth, sheetHeight, spacing } = inputData;
     
     console.log(`🔄 Starting nesting process for ${dxfUrls.length} DXF files...`);
     console.log(`📐 Sheet dimensions: ${sheetWidth}x${sheetHeight}mm with ${spacing}mm spacing`);
 
     // Call the nesting tool with the DXF URLs
-    const nestingResults = await dxfNestingTool.execute({
+    const nestingResults = await nestDxfTool.execute({
       context: {
-        dxfUrls, // CLEAR MAPPING: dxfUrls -> nesting tool's dxfUrls parameter
+        dxfUrls,
         sheetWidth,
         sheetHeight,
         spacing,
@@ -161,25 +160,30 @@ const nestDxfParts = createStep({
       runtimeContext,
     });
 
-    console.log(`✅ Nesting completed: ${nestingResults.placed_count}/${nestingResults.total_parts} parts placed (${nestingResults.utilization_percent.toFixed(1)}% utilization)`);
+    const placedParts = nestingResults.placedParts || 0;
+    const totalParts = nestingResults.totalParts || dxfUrls.length;
+    const utilization = nestingResults.utilization || 0;
+    const unfittableParts = totalParts - placedParts;
+
+    console.log(`✅ Nesting completed: ${placedParts}/${totalParts} parts placed (${utilization.toFixed(1)}% utilization)`);
 
     // Use the nesting agent to analyze the results
     const nestingAnalysisPrompt = `Analyze these DXF nesting results:
 
 Nesting Results:
-- Parts successfully placed: ${nestingResults.placed_count}
-- Parts that couldn't fit: ${nestingResults.unfittable_count}
-- Total parts attempted: ${nestingResults.total_parts}
-- Sheet utilization: ${nestingResults.utilization_percent.toFixed(2)}%
+- Parts successfully placed: ${placedParts}
+- Parts that couldn't fit: ${unfittableParts}
+- Total parts attempted: ${totalParts}
+- Sheet utilization: ${utilization.toFixed(2)}%
 - Status: ${nestingResults.message}
 ${nestingResults.error ? `- Error: ${nestingResults.error}` : ''}
-${nestingResults.nested_dxf_path ? `- Output file: ${nestingResults.nested_dxf_path}` : ''}
+${nestingResults.nestedDxfUrl ? `- Output file: ${nestingResults.nestedDxfUrl}` : ''}
 
 Please provide detailed analysis including:
-1. Efficiency assessment of the ${nestingResults.utilization_percent.toFixed(1)}% utilization
+1. Efficiency assessment of the ${utilization.toFixed(1)}% utilization
 2. Recommendations for improving nesting results
 3. Production and cost implications
-4. Suggestions for handling unfittable parts (${nestingResults.unfittable_count} parts)
+4. Suggestions for handling unfittable parts (${unfittableParts} parts)
 5. Overall assessment and next steps`;
 
     const response = await nestingAgent.stream([
@@ -196,8 +200,8 @@ Please provide detailed analysis including:
 
     return {
       originalDxfUrls: dxfUrls,
-      originalCount: dxfUrls.length,
-      originalAnalysis: 'Demo analysis',
+      originalCount: count,
+      originalAnalysis: analysis,
       nestingResults,
       nestingAnalysis: nestingAnalysisText,
     };
@@ -218,13 +222,14 @@ const supabaseTestWorkflow = createWorkflow({
     originalCount: z.number(),
     originalAnalysis: z.string(),
     nestingResults: z.object({
-      utilization_percent: z.number(),
-      placed_count: z.number(),
-      total_parts: z.number(),
-      unfittable_count: z.number(),
-      nested_dxf_path: z.string().optional(),
+      success: z.boolean(),
+      nestedDxfUrl: z.string().optional(),
+      utilization: z.number().optional(),
+      placedParts: z.number().optional(),
+      totalParts: z.number().optional(),
       message: z.string(),
       error: z.string().optional(),
+      processingTime: z.number().optional(),
     }),
     nestingAnalysis: z.string(),
   }),

@@ -105,4 +105,4 @@ function getWeatherCondition(code: number): string {
 export { getDxfUrlsTool } from './supabase';
 
 // Export nesting tools
-export { dxfNestingTool } from './nesting/nester';
+export { nestDxfTool } from './nesting/nester';

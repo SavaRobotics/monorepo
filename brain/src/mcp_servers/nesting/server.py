@@ -16,7 +16,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, current_dir)
 
 # Import the nesting functionality
-from nest import DXFNester
+from webdemo.docker.nesting.nest import DXFNester
 
 async def handle_mcp_request(request: Dict[str, Any]) -> Dict[str, Any]:
     """Handle MCP protocol requests."""

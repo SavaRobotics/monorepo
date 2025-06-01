@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+ FROM ubuntu:22.04
 
 # Avoid interactive prompts during build
 ENV DEBIAN_FRONTEND=noninteractive
@@ -32,12 +32,15 @@ ENV SUPABASE_URL="https://pynaxyfwywlqfvtjbtuc.supabase.co"
 ENV SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5bmF4eWZ3eXdscWZ2dGpidHVjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODIwNzYxNiwiZXhwIjoyMDYzNzgzNjE2fQ.2jv211NlxOdDcbtE6GxGl7kg38JxvwWZx1sPz9HtzBg"
 ENV K_FACTOR="0.38"
 
+# Copy API server
+COPY api.py /app/api.py
+
 # Expose port for API
-EXPOSE 3000
+EXPOSE 5001
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:3000/health')"
+  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')"
 
 # Start the API server
 CMD ["python3", "/app/api.py"]
