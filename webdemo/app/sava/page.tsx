@@ -62,6 +62,9 @@ export default function AiTaskAppPage() {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
   const [workflowLogs, setWorkflowLogs] = useState<any[]>([])
   const [showStlViewer, setShowStlViewer] = useState(false)
+  const [showDxfViewer, setShowDxfViewer] = useState(false)
+  const [showGcodeViewer, setShowGcodeViewer] = useState(false)
+  const [showNestedDxfViewer, setShowNestedDxfViewer] = useState(false)
   const logsEndRef = useRef<HTMLDivElement>(null)
 
   // Start workflow
@@ -138,6 +141,45 @@ export default function AiTaskAppPage() {
       return () => clearTimeout(timer)
     } else {
       setShowStlViewer(false)
+    }
+  }, [currentStep, selectedStepId])
+
+  // Handle DXF viewer display
+  useEffect(() => {
+    if (currentStep === 'execute-unfold' && selectedStepId === 'execute-unfold') {
+      setShowDxfViewer(true)
+      const timer = setTimeout(() => {
+        setShowDxfViewer(false)
+      }, 4000)
+      return () => clearTimeout(timer)
+    } else {
+      setShowDxfViewer(false)
+    }
+  }, [currentStep, selectedStepId])
+
+  // Handle G-code viewer display
+  useEffect(() => {
+    if (currentStep === 'generate-gcode-from-nested-dxf' && selectedStepId === 'generate-gcode-from-nested-dxf') {
+      setShowGcodeViewer(true)
+      const timer = setTimeout(() => {
+        setShowGcodeViewer(false)
+      }, 5000)
+      return () => clearTimeout(timer)
+    } else {
+      setShowGcodeViewer(false)
+    }
+  }, [currentStep, selectedStepId])
+
+  // Handle nested DXF viewer display
+  useEffect(() => {
+    if (currentStep === 'call-nester-docker' && selectedStepId === 'call-nester-docker') {
+      setShowNestedDxfViewer(true)
+      const timer = setTimeout(() => {
+        setShowNestedDxfViewer(false)
+      }, 4000)
+      return () => clearTimeout(timer)
+    } else {
+      setShowNestedDxfViewer(false)
     }
   }, [currentStep, selectedStepId])
 
@@ -310,6 +352,33 @@ export default function AiTaskAppPage() {
                     src="http://localhost:7892/view-stl?url=https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/stepfiles//Zipline-003.stl"
                     className="w-full h-full"
                     title="STL Viewer"
+                  />
+                </div>
+              ) : selectedStepId === 'execute-unfold' && currentStep === 'execute-unfold' && showDxfViewer ? (
+                // Show iframe during DXF unfolding for 4 seconds
+                <div className="relative w-full max-w-6xl aspect-video rounded-lg border border-zinc-700 overflow-hidden bg-zinc-900">
+                  <iframe
+                    src="http://localhost:7892/view-dxf?url=https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/dxffiles/unfolds/2025-06-02T05-22-07-776Z_unfold_916e1fd8-ab71-4cc2-8431-fb7106015128.dxf"
+                    className="w-full h-full"
+                    title="DXF Viewer"
+                  />
+                </div>
+              ) : selectedStepId === 'generate-gcode-from-nested-dxf' && currentStep === 'generate-gcode-from-nested-dxf' && showGcodeViewer ? (
+                // Show iframe during G-code generation for 5 seconds
+                <div className="relative w-full max-w-6xl aspect-video rounded-lg border border-zinc-700 overflow-hidden bg-zinc-900">
+                  <iframe
+                    src="http://localhost:7892/view-gcode?url=https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/gcodefiles//nested_6parts_1.5mm_complete.gcode"
+                    className="w-full h-full"
+                    title="G-code Viewer"
+                  />
+                </div>
+              ) : selectedStepId === 'call-nester-docker' && currentStep === 'call-nester-docker' && showNestedDxfViewer ? (
+                // Show iframe during nesting for 4 seconds
+                <div className="relative w-full max-w-6xl aspect-video rounded-lg border border-zinc-700 overflow-hidden bg-zinc-900">
+                  <iframe
+                    src="http://localhost:7892/view-dxf?url=https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/stepfiles//nested_2025-06-02T05-04-39-918Z.dxf"
+                    className="w-full h-full"
+                    title="Nested DXF Viewer"
                   />
                 </div>
               ) : (

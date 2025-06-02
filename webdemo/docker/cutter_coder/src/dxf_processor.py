@@ -89,6 +89,7 @@ class DXFProcessor:
             else:
                 self.parts = all_parts
         else:
+            print("No parts found")
             self.parts = all_parts
         
         logger.info(f"Loaded DXF with {len(self.parts)} parts")
