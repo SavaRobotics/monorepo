@@ -72,7 +72,7 @@ export default function AiTaskAppPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          cadFileUrl: 'https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/stepfiles/testparts/Part_bend_1a.step',
+          cadFileUrl: 'https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/stepfiles//Zipline-003.step',
           kFactor: 0.038,
           outputFormat: 'dxf',
         }),
