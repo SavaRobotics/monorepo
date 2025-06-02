@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     g++ \
     git \
     libgeos-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -28,15 +29,21 @@ COPY src/ ./src/
 COPY templates/ ./templates/
 COPY temp_pycam/ ./temp_pycam/
 
-# Create temp directory
-RUN mkdir -p /tmp/cutter_coder
+# Create temp directory and samples directory
+RUN mkdir -p /tmp/cutter_coder /app/samples
 
 # Expose port
-EXPOSE 8000
+EXPOSE 9000
 
 # Set environment variables
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+ENV LOG_LEVEL=INFO
+ENV MAX_FILE_SIZE=52428800
+
+# Add healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=40s \
+    CMD curl -f http://localhost:9000/health || exit 1
 
 # Run the application
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "9000"]

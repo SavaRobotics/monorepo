@@ -8,7 +8,7 @@ services:
     image: cutter-coder:latest
     container_name: cutter-coder
     ports:
-      - "7777:8000"
+      - "9000:9000"
     volumes:
       # Mount temp directory for file processing
       - ./temp:/tmp/cutter_coder
@@ -19,7 +19,7 @@ services:
       - MAX_FILE_SIZE=52428800  # 50MB
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
