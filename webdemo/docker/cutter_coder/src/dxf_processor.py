@@ -68,7 +68,7 @@ class DXFProcessor:
             
             # Sort by area (largest first)
             part_areas.sort(key=lambda x: x[1], reverse=True)
-            
+            print(part_areas)
             # If the largest part is significantly bigger than the second largest, it's likely the sheet
             if len(part_areas) >= 2:
                 largest_area = part_areas[0][1]
