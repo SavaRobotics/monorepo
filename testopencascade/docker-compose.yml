@@ -1,0 +1,9 @@
+version: '3.8'
+
+services:
+  step-viewer:
+    build: .
+    ports:
+      - "7892:7892"
+    container_name: step-viewer-server
+    restart: unless-stopped
