@@ -131,57 +131,65 @@ export default function AiTaskAppPage() {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [workflowLogs])
 
-  // Handle STL viewer display
+  // Handle STL viewer display (from analyzing input to analyzing results)
   useEffect(() => {
-    if (currentStep === 'analyze-workflow-input' && selectedStepId === 'analyze-workflow-input') {
+    const stlViewerSteps = [
+      'analyze-workflow-input',
+      'execute-unfold',
+      'analyze-unfold-results'
+    ]
+    
+    if (stlViewerSteps.includes(selectedStepId || '')) {
       setShowStlViewer(true)
-      const timer = setTimeout(() => {
-        setShowStlViewer(false)
-      }, 3000)
-      return () => clearTimeout(timer)
     } else {
       setShowStlViewer(false)
     }
-  }, [currentStep, selectedStepId])
+  }, [selectedStepId])
 
-  // Handle DXF viewer display
+  // Handle DXF viewer display (from updating database to analyzing database)
   useEffect(() => {
-    if (currentStep === 'execute-unfold' && selectedStepId === 'execute-unfold') {
+    const dxfViewerSteps = [
+      'update-parts-table-with-dxf',
+      'get-all-dxf-files-urls',
+      'analyze-database-operations'
+    ]
+    
+    if (dxfViewerSteps.includes(selectedStepId || '')) {
       setShowDxfViewer(true)
-      const timer = setTimeout(() => {
-        setShowDxfViewer(false)
-      }, 4000)
-      return () => clearTimeout(timer)
     } else {
       setShowDxfViewer(false)
     }
-  }, [currentStep, selectedStepId])
+  }, [selectedStepId])
 
-  // Handle G-code viewer display
+  // Handle nested DXF viewer display (from nesting parts to analyzing nesting)
   useEffect(() => {
-    if (currentStep === 'generate-gcode-from-nested-dxf' && selectedStepId === 'generate-gcode-from-nested-dxf') {
-      setShowGcodeViewer(true)
-      const timer = setTimeout(() => {
-        setShowGcodeViewer(false)
-      }, 5000)
-      return () => clearTimeout(timer)
-    } else {
-      setShowGcodeViewer(false)
-    }
-  }, [currentStep, selectedStepId])
-
-  // Handle nested DXF viewer display
-  useEffect(() => {
-    if (currentStep === 'call-nester-docker' && selectedStepId === 'call-nester-docker') {
+    const nestedDxfViewerSteps = [
+      'call-nester-docker',
+      'upload-nested-dxf-to-supabase-step',
+      'analyze-nesting-results'
+    ]
+    
+    if (nestedDxfViewerSteps.includes(selectedStepId || '')) {
       setShowNestedDxfViewer(true)
-      const timer = setTimeout(() => {
-        setShowNestedDxfViewer(false)
-      }, 4000)
-      return () => clearTimeout(timer)
     } else {
       setShowNestedDxfViewer(false)
     }
-  }, [currentStep, selectedStepId])
+  }, [selectedStepId])
+
+  // Handle G-code viewer display (from generate gcode through final analysis)
+  useEffect(() => {
+    const gcodeViewerSteps = [
+      'generate-gcode-from-nested-dxf',
+      'upload-gcode-to-supabase',
+      'provide-final-analysis'
+    ]
+    
+    if (gcodeViewerSteps.includes(selectedStepId || '')) {
+      setShowGcodeViewer(true)
+    } else {
+      setShowGcodeViewer(false)
+    }
+  }, [selectedStepId])
 
   // Get step status
   const getStepStatus = (stepId: string): 'todo' | 'in-progress' | 'done' | 'error' => {
@@ -333,7 +341,7 @@ export default function AiTaskAppPage() {
           </div>
           <div className="flex items-center text-xs text-zinc-400 mt-1">
             <PencilLine className="w-3 h-3 mr-1.5" />
-            Manus is using Editor
+            SAVA is using Editor
           </div>
           <div className="mt-2">
             <span className="bg-zinc-800 text-zinc-400 px-2 py-1 rounded-md text-xs inline-block">
@@ -345,8 +353,8 @@ export default function AiTaskAppPage() {
         <div className="flex-1 overflow-hidden p-6 bg-zinc-850 flex items-center justify-center">
           {selectedStepId ? (
             <div className="w-full h-full flex items-center justify-center">
-              {selectedStepId === 'analyze-workflow-input' && currentStep === 'analyze-workflow-input' && showStlViewer ? (
-                // Show iframe during step file analysis for 3 seconds
+              {showStlViewer && ['analyze-workflow-input', 'execute-unfold', 'analyze-unfold-results'].includes(selectedStepId) ? (
+                // Show STL viewer from analyzing input through analyzing results
                 <div className="relative w-full max-w-6xl aspect-video rounded-lg border border-zinc-700 overflow-hidden bg-zinc-900">
                   <iframe
                     src="http://localhost:7892/view-stl?url=https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/stepfiles//Zipline-003.stl"
@@ -354,8 +362,8 @@ export default function AiTaskAppPage() {
                     title="STL Viewer"
                   />
                 </div>
-              ) : selectedStepId === 'execute-unfold' && currentStep === 'execute-unfold' && showDxfViewer ? (
-                // Show iframe during DXF unfolding for 4 seconds
+              ) : showDxfViewer && ['update-parts-table-with-dxf', 'get-all-dxf-files-urls', 'analyze-database-operations'].includes(selectedStepId) ? (
+                // Show DXF viewer from updating database through analyzing database
                 <div className="relative w-full max-w-6xl aspect-video rounded-lg border border-zinc-700 overflow-hidden bg-zinc-900">
                   <iframe
                     src="http://localhost:7892/view-dxf?url=https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/dxffiles/unfolds/2025-06-02T05-22-07-776Z_unfold_916e1fd8-ab71-4cc2-8431-fb7106015128.dxf"
@@ -363,22 +371,22 @@ export default function AiTaskAppPage() {
                     title="DXF Viewer"
                   />
                 </div>
-              ) : selectedStepId === 'generate-gcode-from-nested-dxf' && currentStep === 'generate-gcode-from-nested-dxf' && showGcodeViewer ? (
-                // Show iframe during G-code generation for 5 seconds
-                <div className="relative w-full max-w-6xl aspect-video rounded-lg border border-zinc-700 overflow-hidden bg-zinc-900">
-                  <iframe
-                    src="http://localhost:7892/view-gcode?url=https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/gcodefiles//nested_6parts_1.5mm_complete.gcode"
-                    className="w-full h-full"
-                    title="G-code Viewer"
-                  />
-                </div>
-              ) : selectedStepId === 'call-nester-docker' && currentStep === 'call-nester-docker' && showNestedDxfViewer ? (
-                // Show iframe during nesting for 4 seconds
+              ) : showNestedDxfViewer && ['call-nester-docker', 'upload-nested-dxf-to-supabase-step', 'analyze-nesting-results'].includes(selectedStepId) ? (
+                // Show nested DXF viewer from nesting through analyzing nesting
                 <div className="relative w-full max-w-6xl aspect-video rounded-lg border border-zinc-700 overflow-hidden bg-zinc-900">
                   <iframe
                     src="http://localhost:7892/view-dxf?url=https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/stepfiles//nested_2025-06-02T05-04-39-918Z.dxf"
                     className="w-full h-full"
                     title="Nested DXF Viewer"
+                  />
+                </div>
+              ) : showGcodeViewer && ['generate-gcode-from-nested-dxf', 'upload-gcode-to-supabase', 'provide-final-analysis'].includes(selectedStepId) ? (
+                // Show G-code viewer from generate gcode through final analysis
+                <div className="relative w-full max-w-6xl aspect-video rounded-lg border border-zinc-700 overflow-hidden bg-zinc-900">
+                  <iframe
+                    src="http://localhost:7892/view-gcode?url=https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/gcodefiles//nested_6parts_1.5mm_complete.gcode"
+                    className="w-full h-full"
+                    title="G-code Viewer"
                   />
                 </div>
               ) : (
