@@ -5,6 +5,71 @@ import { v4 as uuidv4 } from 'uuid';
 // Store for active workflow runs (in production, use Redis or similar)
 export const workflowRuns = new Map<string, any>();
 
+// Console log interceptor
+function createLogInterceptor(runId: string) {
+  const originalLog = console.log;
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  
+  const run = workflowRuns.get(runId);
+  if (!run) return () => {};
+  
+  // Initialize logs array
+  if (!run.logs) {
+    run.logs = [];
+  }
+  
+  // Override console methods
+  console.log = (...args: any[]) => {
+    originalLog.apply(console, args);
+    const message = args.map(arg => 
+      typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+    ).join(' ');
+    
+    run.logs.push({
+      timestamp: new Date(),
+      level: 'info',
+      message,
+      stepId: run.currentStep
+    });
+  };
+  
+  console.error = (...args: any[]) => {
+    originalError.apply(console, args);
+    const message = args.map(arg => 
+      typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+    ).join(' ');
+    
+    run.logs.push({
+      timestamp: new Date(),
+      level: 'error',
+      message,
+      stepId: run.currentStep
+    });
+  };
+  
+  console.warn = (...args: any[]) => {
+    originalWarn.apply(console, args);
+    const message = args.map(arg => 
+      typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+    ).join(' ');
+    
+    run.logs.push({
+      timestamp: new Date(),
+      level: 'warn',
+      message,
+      stepId: run.currentStep
+    });
+  };
+  
+  // Return cleanup function
+  return () => {
+    console.log = originalLog;
+    console.error = originalError;
+    console.warn = originalWarn;
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -50,25 +115,29 @@ async function executeWorkflow(runId: string, inputData: any) {
   const run = workflowRuns.get(runId);
   if (!run) return;
 
-  // Define workflow steps with simulated progress
+  // Define workflow steps
   const workflowSteps = [
-    { id: 'analyze-workflow-input', title: 'Analyzing Input Parameters', duration: 2000 },
-    { id: 'execute-unfold', title: 'Unfolding CAD File', duration: 5000 },
-    { id: 'analyze-unfold-results', title: 'Analyzing Unfold Results', duration: 2000 },
-    { id: 'save-dxf-to-supabase', title: 'Uploading DXF to Cloud Storage', duration: 3000 },
-    { id: 'update-parts-table-with-dxf', title: 'Updating Parts Database', duration: 2000 },
-    { id: 'get-all-dxf-files-urls', title: 'Fetching All DXF Files', duration: 1500 },
-    { id: 'analyze-database-operations', title: 'Analyzing Database Operations', duration: 2000 },
-    { id: 'call-nester-docker', title: 'Nesting Parts for Optimization', duration: 4000 },
-    { id: 'upload-nested-dxf-to-supabase-step', title: 'Uploading Nested DXF', duration: 2500 },
-    { id: 'analyze-nesting-results', title: 'Analyzing Nesting Results', duration: 2000 },
-    { id: 'generate-gcode-from-nested-dxf', title: 'Generating G-code', duration: 3500 },
-    { id: 'upload-gcode-to-supabase', title: 'Uploading G-code', duration: 2000 },
-    { id: 'provide-final-analysis', title: 'Generating Final Analysis', duration: 3000 },
+    { id: 'analyze-workflow-input', title: 'Analyzing Input Parameters' },
+    { id: 'execute-unfold', title: 'Unfolding CAD File' },
+    { id: 'analyze-unfold-results', title: 'Analyzing Unfold Results' },
+    { id: 'save-dxf-to-supabase', title: 'Uploading DXF to Cloud Storage' },
+    { id: 'update-parts-table-with-dxf', title: 'Updating Parts Database' },
+    { id: 'get-all-dxf-files-urls', title: 'Fetching All DXF Files' },
+    { id: 'analyze-database-operations', title: 'Analyzing Database Operations' },
+    { id: 'call-nester-docker', title: 'Nesting Parts for Optimization' },
+    { id: 'upload-nested-dxf-to-supabase-step', title: 'Uploading Nested DXF' },
+    { id: 'analyze-nesting-results', title: 'Analyzing Nesting Results' },
+    { id: 'generate-gcode-from-nested-dxf', title: 'Generating G-code' },
+    { id: 'upload-gcode-to-supabase', title: 'Uploading G-code' },
+    { id: 'provide-final-analysis', title: 'Generating Final Analysis' },
   ];
+
+  // Set up log interceptor
+  const cleanupLogs = createLogInterceptor(runId);
 
   try {
     run.status = 'running';
+    run.logs = [];
     
     // Initialize all steps as 'todo'
     run.steps = workflowSteps.map(step => ({
@@ -78,61 +147,95 @@ async function executeWorkflow(runId: string, inputData: any) {
       description: 'Waiting for execution...',
       status: 'todo',
       timestamp: new Date(),
+      logs: []
     }));
 
-    // Simulate workflow execution with real-time updates
-    for (let i = 0; i < workflowSteps.length; i++) {
-      const step = workflowSteps[i];
-      
-      // Update step to in-progress
-      run.steps[i] = {
-        ...run.steps[i],
-        status: 'in-progress',
-        description: `Executing ${step.title}...`,
-        timestamp: new Date(),
-      };
-      run.currentStep = step.id;
-
-      // Simulate tool calls during execution
-      const toolCalls = getToolCallsForStep(step.id);
-      for (let j = 0; j < toolCalls.length; j++) {
-        await new Promise(resolve => setTimeout(resolve, step.duration / toolCalls.length));
-        run.steps[i].toolCall = toolCalls[j];
-        run.steps[i].progress = Math.round(((j + 1) / toolCalls.length) * 100);
-      }
-
-      // Complete the step
-      run.steps[i] = {
-        ...run.steps[i],
-        status: 'done',
-        description: `Completed ${step.title}`,
-        progress: 100,
-        timestamp: new Date(),
-      };
-    }
-
-    // Actually execute the workflow in parallel (without blocking)
+    // Get the workflow
     const workflow = mastra.getWorkflow('cadUnfoldTestWorkflow');
-    if (workflow) {
-      const workflowRun = workflow.createRun();
-      workflowRun.start({ inputData }).then(result => {
-        run.status = result.status === 'success' ? 'completed' : 'failed';
-        run.result = result.result;
-        run.endTime = new Date();
-        
-        if (result.status === 'failed') {
-          run.error = (result as any).error?.message || 'Unknown error';
-        }
-      });
+    if (!workflow) {
+      throw new Error('Workflow not found');
     }
 
-    // Mark as completed after simulation
-    setTimeout(() => {
-      if (run.status === 'running') {
-        run.status = 'completed';
-        run.endTime = new Date();
+    // Create a simple step progress tracker
+    let currentStepIndex = 0;
+    const updateStepProgress = () => {
+      if (currentStepIndex < workflowSteps.length) {
+        const stepId = workflowSteps[currentStepIndex].id;
+        run.currentStep = stepId;
+        
+        // Update step status
+        run.steps[currentStepIndex] = {
+          ...run.steps[currentStepIndex],
+          status: 'in-progress',
+          description: `Executing ${run.steps[currentStepIndex].title}...`,
+          timestamp: new Date()
+        };
+        
+        // Monitor logs for step completion indicators
+        const checkStepCompletion = setInterval(() => {
+          const logs = run.logs || [];
+          const recentLogs = logs.slice(-10);
+          
+          // Check for step completion patterns
+          const hasCompleted = recentLogs.some((log: any) => 
+            log.message.includes('✅') || 
+            log.message.includes('completed') ||
+            log.message.includes('Analysis:') ||
+            log.message.includes('Successfully') ||
+            log.message.includes('uploaded to Supabase') ||
+            log.message.includes('Completed') ||
+            (log.message.includes('📝') && log.message.includes('Analysis')) // LLM analysis outputs
+          );
+          
+          if (hasCompleted || currentStepIndex >= workflowSteps.length - 1) {
+            clearInterval(checkStepCompletion);
+            
+            // Complete current step
+            run.steps[currentStepIndex] = {
+              ...run.steps[currentStepIndex],
+              status: 'done',
+              description: `Completed ${run.steps[currentStepIndex].title}`,
+              progress: 100,
+              timestamp: new Date()
+            };
+            
+            // Move to next step
+            currentStepIndex++;
+            if (currentStepIndex < workflowSteps.length) {
+              setTimeout(updateStepProgress, 500);
+            }
+          }
+        }, 500);
       }
-    }, workflowSteps.reduce((acc, step) => acc + step.duration, 0) + 2000);
+    };
+
+    // Start tracking progress
+    updateStepProgress();
+
+    // Execute the actual workflow
+    const workflowRun = workflow.createRun();
+    const result = await workflowRun.start({ inputData });
+
+    run.status = result.status === 'success' ? 'completed' : 'failed';
+    if (result.status === 'success') {
+      run.result = (result as any).result;
+    }
+    run.endTime = new Date();
+    
+    // Mark all remaining steps as done or error
+    run.steps.forEach((step: any, index: number) => {
+      if (step.status === 'todo' || step.status === 'in-progress') {
+        run.steps[index] = {
+          ...step,
+          status: result.status === 'success' ? 'done' : 'error',
+          timestamp: new Date()
+        };
+      }
+    });
+    
+    if (result.status === 'failed') {
+      run.error = (result as any).error?.message || 'Unknown error';
+    }
 
   } catch (error) {
     run.status = 'failed';
@@ -141,12 +244,15 @@ async function executeWorkflow(runId: string, inputData: any) {
     
     // Mark current step as error
     if (run.currentStep) {
-      const stepIndex = run.steps.findIndex(s => s.stepId === run.currentStep);
+      const stepIndex = run.steps.findIndex((s: any) => s.stepId === run.currentStep);
       if (stepIndex >= 0) {
         run.steps[stepIndex].status = 'error';
         run.steps[stepIndex].description = `Error: ${run.error}`;
       }
     }
+  } finally {
+    // Restore console methods
+    cleanupLogs();
   }
 }
 

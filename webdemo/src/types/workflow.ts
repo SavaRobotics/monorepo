@@ -8,6 +8,14 @@ export interface WorkflowStatus {
   progress?: number;
   timestamp: Date;
   details?: any;
+  logs?: string[];
+}
+
+export interface WorkflowLog {
+  timestamp: Date;
+  level: 'info' | 'warn' | 'error' | 'debug';
+  message: string;
+  stepId?: string;
 }
 
 export interface WorkflowRun {

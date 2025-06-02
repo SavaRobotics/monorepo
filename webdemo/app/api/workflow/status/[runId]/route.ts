@@ -39,6 +39,7 @@ export async function GET(
           currentStep: run.currentStep,
           steps: run.steps,
           error: run.error,
+          logs: run.logs || [],
         });
         
         controller.enqueue(encoder.encode(`event: status\ndata: ${data}\n\n`));

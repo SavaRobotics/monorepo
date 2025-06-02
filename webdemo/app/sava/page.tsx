@@ -34,7 +34,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { WorkflowStatus, WorkflowStepConfig } from "@/src/types/workflow"
 
 // Workflow step configuration
@@ -60,11 +60,14 @@ export default function AiTaskAppPage() {
   const [currentStep, setCurrentStep] = useState<string | null>(null)
   const [isRunning, setIsRunning] = useState(false)
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
+  const [workflowLogs, setWorkflowLogs] = useState<any[]>([])
+  const logsEndRef = useRef<HTMLDivElement>(null)
 
   // Start workflow
   const startWorkflow = async () => {
     try {
       setIsRunning(true)
+      setWorkflowLogs([]) // Reset logs for new workflow
       const response = await fetch('/api/workflow/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -100,6 +103,9 @@ export default function AiTaskAppPage() {
         setCurrentStep(data.currentStep)
         setSelectedStepId(data.currentStep)
       }
+      if (data.logs) {
+        setWorkflowLogs(data.logs)
+      }
       if (data.status === 'completed' || data.status === 'failed') {
         setIsRunning(false)
       }
@@ -115,6 +121,11 @@ export default function AiTaskAppPage() {
       eventSource.close()
     }
   }, [workflowRunId])
+
+  // Auto-scroll logs to bottom when new logs arrive
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [workflowLogs])
 
   // Get step status
   const getStepStatus = (stepId: string): 'todo' | 'in-progress' | 'done' | 'error' => {
@@ -404,6 +415,65 @@ export default function AiTaskAppPage() {
             {getCompletedStepsCount()}/{workflowStepConfigs.length} <ChevronUp className="inline w-3 h-3" />
           </div>
         </footer>
+      </aside>
+
+      {/* Right Sidebar - LLM Logs */}
+      <aside className="w-80 flex-shrink-0 bg-zinc-900 flex flex-col border-l border-zinc-800">
+        <header className="p-4 border-b border-zinc-800 flex-shrink-0">
+          <h2 className="text-sm font-semibold text-zinc-100">LLM Logs</h2>
+        </header>
+        
+        <div className="flex-1 overflow-y-auto p-4 font-mono text-xs">
+          <div className="space-y-1">
+            {workflowLogs.map((log, index) => {
+              // Determine log color based on content and level
+              let textColor = 'text-zinc-400'
+              
+              if (log.level === 'error') {
+                textColor = 'text-red-400'
+              } else if (log.level === 'warn') {
+                textColor = 'text-yellow-400'
+              } else if (log.message.includes('✅')) {
+                textColor = 'text-green-400'
+              } else if (log.message.includes('🔧') || log.message.includes('🔨')) {
+                textColor = 'text-blue-400'
+              } else if (log.message.includes('📝') || log.message.includes('🤔')) {
+                textColor = 'text-yellow-400'
+              } else if (log.message.includes('📤') || log.message.includes('☁️')) {
+                textColor = 'text-cyan-400'
+              } else if (log.message.includes('❌')) {
+                textColor = 'text-red-400'
+              } else if (log.message.includes('⚠️')) {
+                textColor = 'text-orange-400'
+              } else if (log.message.includes('Analysis:')) {
+                textColor = 'text-purple-400'
+              }
+              
+              return (
+                <div key={index} className={`${textColor} break-words`}>
+                  [{new Date(log.timestamp).toLocaleTimeString()}] {log.message}
+                </div>
+              )
+            })}
+            
+            {/* Initial state */}
+            {workflowLogs.length === 0 && !isRunning && (
+              <div className="text-zinc-500">
+                Waiting for workflow to start...
+              </div>
+            )}
+            
+            {/* Cursor */}
+            {isRunning && (
+              <div className="text-zinc-400 animate-pulse">
+                █
+              </div>
+            )}
+            
+            {/* Auto-scroll anchor */}
+            <div ref={logsEndRef} />
+          </div>
+        </div>
       </aside>
 
     </div>
