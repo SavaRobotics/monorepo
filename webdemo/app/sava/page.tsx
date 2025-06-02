@@ -61,6 +61,7 @@ export default function AiTaskAppPage() {
   const [isRunning, setIsRunning] = useState(false)
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null)
   const [workflowLogs, setWorkflowLogs] = useState<any[]>([])
+  const [showStlViewer, setShowStlViewer] = useState(false)
   const logsEndRef = useRef<HTMLDivElement>(null)
 
   // Start workflow
@@ -126,6 +127,19 @@ export default function AiTaskAppPage() {
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [workflowLogs])
+
+  // Handle STL viewer display
+  useEffect(() => {
+    if (currentStep === 'analyze-workflow-input' && selectedStepId === 'analyze-workflow-input') {
+      setShowStlViewer(true)
+      const timer = setTimeout(() => {
+        setShowStlViewer(false)
+      }, 3000)
+      return () => clearTimeout(timer)
+    } else {
+      setShowStlViewer(false)
+    }
+  }, [currentStep, selectedStepId])
 
   // Get step status
   const getStepStatus = (stepId: string): 'todo' | 'in-progress' | 'done' | 'error' => {
@@ -261,11 +275,11 @@ export default function AiTaskAppPage() {
         </div>
       </aside>
 
-      {/* Manus's Computer (formerly right sidebar) */}
+      {/* SAVA's Computer (formerly right sidebar) */}
       <aside className="flex-1 flex flex-col bg-zinc-850 overflow-hidden">
         <header className="p-4 border-b border-zinc-800 flex-shrink-0">
           <div className="flex justify-between items-center">
-            <h2 className="text-base font-semibold text-zinc-100">Manus's Computer</h2>
+            <h2 className="text-base font-semibold text-zinc-100">SAVA's Computer</h2>
             <div className="flex items-center space-x-1">
               <Button variant="ghost" size="icon" className="text-zinc-400 hover:text-zinc-200">
                 <MonitorPlay className="w-5 h-5" />
@@ -288,64 +302,78 @@ export default function AiTaskAppPage() {
 
         <div className="flex-1 overflow-hidden p-6 bg-zinc-850 flex items-center justify-center">
           {selectedStepId ? (
-            <div className="w-full max-w-4xl space-y-4">
-              {(() => {
-                const selectedStep = workflowSteps.find(s => s.stepId === selectedStepId)
-                const config = workflowStepConfigs.find(c => c.id === selectedStepId)
-                const Icon = config?.icon || BarChart3
-                
-                return (
-                  <div className="bg-zinc-900 rounded-lg p-6 border border-zinc-800">
-                    <div className="flex items-start space-x-4">
-                      <div className="p-3 bg-zinc-800 rounded-lg">
-                        <Icon className="w-6 h-6 text-zinc-300" />
-                      </div>
-                      <div className="flex-1 space-y-2">
-                        <h3 className="text-lg font-semibold text-zinc-100">
-                          {config?.title || selectedStepId}
-                        </h3>
-                        <p className="text-sm text-zinc-400">
-                          {selectedStep?.description || 'Waiting for execution...'}
-                        </p>
-                        {selectedStep?.toolCall && (
-                          <div className="mt-3 p-3 bg-zinc-800 rounded-md">
-                            <p className="text-xs text-zinc-500 mb-1">Current operation:</p>
-                            <p className="text-sm text-zinc-300">{selectedStep.toolCall}</p>
+            <div className="w-full h-full flex items-center justify-center">
+              {selectedStepId === 'analyze-workflow-input' && currentStep === 'analyze-workflow-input' && showStlViewer ? (
+                // Show iframe during step file analysis for 3 seconds
+                <div className="relative w-full max-w-6xl aspect-video rounded-lg border border-zinc-700 overflow-hidden bg-zinc-900">
+                  <iframe
+                    src="http://localhost:7892/view-stl?url=https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/stepfiles//Zipline-003.stl"
+                    className="w-full h-full"
+                    title="STL Viewer"
+                  />
+                </div>
+              ) : (
+                // Show regular step info
+                <div className="w-full max-w-4xl space-y-4">
+                  {(() => {
+                    const selectedStep = workflowSteps.find(s => s.stepId === selectedStepId)
+                    const config = workflowStepConfigs.find(c => c.id === selectedStepId)
+                    const Icon = config?.icon || BarChart3
+                    
+                    return (
+                      <div className="bg-zinc-900 rounded-lg p-6 border border-zinc-800">
+                        <div className="flex items-start space-x-4">
+                          <div className="p-3 bg-zinc-800 rounded-lg">
+                            <Icon className="w-6 h-6 text-zinc-300" />
                           </div>
-                        )}
-                        {selectedStep?.status === 'in-progress' && selectedStep?.progress !== undefined && (
-                          <div className="mt-3">
-                            <div className="flex justify-between text-xs text-zinc-500 mb-1">
-                              <span>Progress</span>
-                              <span>{selectedStep.progress}%</span>
-                            </div>
-                            <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-blue-500 transition-all duration-300"
-                                style={{ width: `${selectedStep.progress}%` }}
-                              />
-                            </div>
+                          <div className="flex-1 space-y-2">
+                            <h3 className="text-lg font-semibold text-zinc-100">
+                              {config?.title || selectedStepId}
+                            </h3>
+                            <p className="text-sm text-zinc-400">
+                              {selectedStep?.description || 'Waiting for execution...'}
+                            </p>
+                            {selectedStep?.toolCall && (
+                              <div className="mt-3 p-3 bg-zinc-800 rounded-md">
+                                <p className="text-xs text-zinc-500 mb-1">Current operation:</p>
+                                <p className="text-sm text-zinc-300">{selectedStep.toolCall}</p>
+                              </div>
+                            )}
+                            {selectedStep?.status === 'in-progress' && selectedStep?.progress !== undefined && (
+                              <div className="mt-3">
+                                <div className="flex justify-between text-xs text-zinc-500 mb-1">
+                                  <span>Progress</span>
+                                  <span>{selectedStep.progress}%</span>
+                                </div>
+                                <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden">
+                                  <div 
+                                    className="h-full bg-blue-500 transition-all duration-300"
+                                    style={{ width: `${selectedStep.progress}%` }}
+                                  />
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        )}
+                          <div className="text-right">
+                            {selectedStep?.status === 'done' && (
+                              <span className="text-xs text-green-500">Completed</span>
+                            )}
+                            {selectedStep?.status === 'in-progress' && (
+                              <span className="text-xs text-yellow-500">In Progress</span>
+                            )}
+                            {selectedStep?.status === 'error' && (
+                              <span className="text-xs text-red-500">Error</span>
+                            )}
+                            {selectedStep?.status === 'todo' && (
+                              <span className="text-xs text-zinc-500">Pending</span>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        {selectedStep?.status === 'done' && (
-                          <span className="text-xs text-green-500">Completed</span>
-                        )}
-                        {selectedStep?.status === 'in-progress' && (
-                          <span className="text-xs text-yellow-500">In Progress</span>
-                        )}
-                        {selectedStep?.status === 'error' && (
-                          <span className="text-xs text-red-500">Error</span>
-                        )}
-                        {selectedStep?.status === 'todo' && (
-                          <span className="text-xs text-zinc-500">Pending</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })()}
+                    )
+                  })()}
+                </div>
+              )}
             </div>
           ) : (
             <div className="relative w-full max-w-6xl aspect-video rounded-lg border border-zinc-700 overflow-hidden bg-zinc-800">
