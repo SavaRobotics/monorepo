@@ -1,0 +1,68 @@
+2025-06-07 08:53:06,938 - __main__ - INFO - Starting CNC Controller API server on 0.0.0.0:8000
+2025-06-07 08:53:06,938 - __main__ - INFO - Controller script path: C:\monorepo\controller\simple_controller.py
+2025-06-07 08:53:06,940 - __main__ - INFO - Python executable: C:\Users\vedic\AppData\Local\Programs\Python\Python312\python.exe
+2025-06-07 08:55:13,180 - __main__ - INFO - Starting CNC Controller API server on 0.0.0.0:8000
+2025-06-07 08:55:13,181 - __main__ - INFO - Controller script path: C:\monorepo\controller\simple_controller.py
+2025-06-07 08:55:13,181 - __main__ - INFO - Python executable: C:\Users\vedic\AppData\Local\Programs\Python\Python312\python.exe
+2025-06-07 08:56:40,992 - __main__ - INFO - Starting CNC Controller API server on 0.0.0.0:8001
+2025-06-07 08:56:40,992 - __main__ - INFO - Controller script path: C:\monorepo\controller\simple_controller.py
+2025-06-07 08:56:40,993 - __main__ - INFO - Python executable: C:\Users\vedic\AppData\Local\Programs\Python\Python312\python.exe
+2025-06-07 08:58:55,962 - fastapi_server - INFO - Received G-code run request: https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/gcodefiles//nested_6parts_1.5mm_complete.gcode (Job ID: job_1749311935)
+2025-06-07 08:58:55,969 - fastapi_server - INFO - Starting CNC job job_1749311935 with URL: https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/gcodefiles//nested_6parts_1.5mm_complete.gcode
+2025-06-07 08:58:57,633 - fastapi_server - ERROR - CNC job job_1749311935 failed: Traceback (most recent call last):
+  File "C:\monorepo\controller\simple_controller.py", line 18, in download_gcode
+    print(f"\U0001f504 Downloading from: {url}")
+  File "C:\Users\vedic\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f504' in position 0: character maps to <undefined>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\monorepo\controller\simple_controller.py", line 148, in <module>
+    main()
+  File "C:\monorepo\controller\simple_controller.py", line 135, in main
+    filepath = download_gcode(url)
+               ^^^^^^^^^^^^^^^^^^^
+  File "C:\monorepo\controller\simple_controller.py", line 36, in download_gcode
+    print(f"\u274c Download failed: {e}")
+  File "C:\Users\vedic\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u274c' in position 0: character maps to <undefined>
+
+2025-06-07 08:59:36,570 - fastapi_server - INFO - Received G-code run request: https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/gcodefiles//nested_6parts_1.5mm_complete.gcode (Job ID: job_1749311976)
+2025-06-07 08:59:36,580 - fastapi_server - INFO - Starting CNC job job_1749311976 with URL: https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/gcodefiles//nested_6parts_1.5mm_complete.gcode
+2025-06-07 08:59:37,230 - fastapi_server - ERROR - CNC job job_1749311976 failed: Traceback (most recent call last):
+  File "C:\monorepo\controller\simple_controller.py", line 18, in download_gcode
+    print(f"\U0001f504 Downloading from: {url}")
+  File "C:\Users\vedic\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f504' in position 0: character maps to <undefined>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\monorepo\controller\simple_controller.py", line 148, in <module>
+    main()
+  File "C:\monorepo\controller\simple_controller.py", line 135, in main
+    filepath = download_gcode(url)
+               ^^^^^^^^^^^^^^^^^^^
+  File "C:\monorepo\controller\simple_controller.py", line 36, in download_gcode
+    print(f"\u274c Download failed: {e}")
+  File "C:\Users\vedic\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u274c' in position 0: character maps to <undefined>
+
+2025-06-07 09:01:51,256 - __main__ - INFO - Starting CNC Controller API server on 0.0.0.0:8001
+2025-06-07 09:01:51,256 - __main__ - INFO - Controller script path: C:\monorepo\controller\simple_controller.py
+2025-06-07 09:01:51,256 - __main__ - INFO - Python executable: C:\Users\vedic\AppData\Local\Programs\Python\Python312\python.exe
+2025-06-07 09:01:59,080 - fastapi_server - INFO - Received G-code run request: https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/gcodefiles//nested_6parts_1.5mm_complete.gcode (Job ID: job_1749312119)
+2025-06-07 09:01:59,089 - fastapi_server - INFO - Starting CNC job job_1749312119 with URL: https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/gcodefiles//nested_6parts_1.5mm_complete.gcode
+2025-06-07 09:02:18,752 - fastapi_server - INFO - CNC job job_1749312119 completed successfully
+2025-06-07 09:02:42,383 - fastapi_server - INFO - Received G-code run request: https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/gcodefiles//nested_6parts_1.5mm_complete.gcode (Job ID: job_1749312162)
+2025-06-07 09:02:42,383 - fastapi_server - INFO - Starting CNC job job_1749312162 with URL: https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/gcodefiles//nested_6parts_1.5mm_complete.gcode
+2025-06-07 09:03:01,926 - fastapi_server - INFO - CNC job job_1749312162 completed successfully

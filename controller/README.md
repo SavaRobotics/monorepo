@@ -73,7 +73,7 @@ python fastapi_server.py
 
 ```bash
 # GET request
-curl "http://localhost:8000/run-gcode?url=https://example.com/file.gcode"
+curl "http://localhost:8000/run-gcode?url=https://pynaxyfwywlqfvtjbtuc.supabase.co/storage/v1/object/public/gcodefiles//nested_6parts_1.5mm_complete.gcode"
 
 # POST request
 curl -X POST "http://localhost:8000/run-gcode" \
@@ -87,7 +87,7 @@ The system integrates with Mastra workflows for complete CAD-to-CNC automation:
 
 1. Set environment variables on the workflow computer:
 ```bash
-export WINDOWS_CNC_IP=192.168.1.100  # IP of Windows CNC computer
+export WINDOWS_CNC_IP=192.168.4.68  # IP of Windows CNC computer
 export CNC_CONTROLLER_PORT=8000       # Port of FastAPI server
 ```
 

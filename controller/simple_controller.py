@@ -7,6 +7,13 @@ import time
 import requests
 from pathlib import Path
 import sys
+import os
+
+# Set UTF-8 encoding for Windows console
+if os.name == 'nt':  # Windows
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # Configuration
 GCODE_FOLDER = Path("C:/CNC/GCode")
@@ -15,7 +22,7 @@ GCODE_FOLDER.mkdir(parents=True, exist_ok=True)
 def download_gcode(url):
     """Download G-code file from URL"""
     try:
-        print(f"🔄 Downloading from: {url}")
+        print(f"[DOWNLOAD] Downloading from: {url}")
         
         response = requests.get(url, timeout=30)
         response.raise_for_status()
@@ -29,11 +36,11 @@ def download_gcode(url):
         with open(filepath, 'wb') as f:
             f.write(response.content)
         
-        print(f"✅ Downloaded to: {filepath}")
+        print(f"[SUCCESS] Downloaded to: {filepath}")
         return filepath
         
     except Exception as e:
-        print(f"❌ Download failed: {e}")
+        print(f"[ERROR] Download failed: {e}")
         return None
 
 def run_in_mach3(filepath):
@@ -42,7 +49,7 @@ def run_in_mach3(filepath):
         # Find Mach3 window
         windows = pyautogui.getWindowsWithTitle("Mach3")
         if not windows:
-            print("❌ Mach3 not found! Please open Mach3 first.")
+            print("[ERROR] Mach3 not found! Please open Mach3 first.")
             return False
         
         # Activate Mach3
@@ -50,7 +57,7 @@ def run_in_mach3(filepath):
         time.sleep(1.5)
         
         # Load G-code file
-        print("📁 Loading G-code file...")
+        print("[LOADING] Loading G-code file...")
         load_gcode_button = pyautogui.locateOnScreen('images/load_gcode.png', confidence=0.8)
         if load_gcode_button:
             pyautogui.click(load_gcode_button)
@@ -65,7 +72,7 @@ def run_in_mach3(filepath):
                 time.sleep(3)
         else:
             # Fallback to keyboard shortcut
-            print("Using keyboard shortcut...")
+            print("[FALLBACK] Using keyboard shortcut...")
             pyautogui.hotkey('ctrl', 'o')
             time.sleep(2)
             pyautogui.typewrite(str(filepath))
@@ -74,7 +81,7 @@ def run_in_mach3(filepath):
             time.sleep(3)
         
         # Raise Z axis for safety
-        print("⬆️ Raising Z axis...")
+        print("[SAFETY] Raising Z axis...")
         z_up_button = pyautogui.locateOnScreen('images/z_up.png', confidence=0.8)
         if z_up_button:
             for i in range(3):
@@ -86,7 +93,7 @@ def run_in_mach3(filepath):
                 time.sleep(0.5)
         
         # Start spindle
-        print("🔄 Starting spindle...")
+        print("[SPINDLE] Starting spindle...")
         spindle_button = pyautogui.locateOnScreen('images/spindle_start.png', confidence=0.8)
         if spindle_button:
             pyautogui.click(spindle_button)
@@ -95,7 +102,7 @@ def run_in_mach3(filepath):
         time.sleep(3)
         
         # Go to zero
-        print("🏠 Going to zero...")
+        print("[POSITIONING] Going to zero...")
         go_zero_button = pyautogui.locateOnScreen('images/go_to_zero.png', confidence=0.8)
         if go_zero_button:
             pyautogui.click(go_zero_button)
@@ -104,18 +111,18 @@ def run_in_mach3(filepath):
         time.sleep(5)
         
         # Start program
-        print("▶️ Starting program...")
+        print("[STARTING] Starting program...")
         start_button = pyautogui.locateOnScreen('images/start.png', confidence=0.8)
         if start_button:
             pyautogui.click(start_button)
         else:
             pyautogui.click(87, 555)
         
-        print("✅ G-code program running!")
+        print("[SUCCESS] G-code program running!")
         return True
         
     except Exception as e:
-        print(f"❌ Mach3 error: {e}")
+        print(f"[ERROR] Mach3 error: {e}")
         return False
 
 def main():
@@ -140,9 +147,9 @@ def main():
     success = run_in_mach3(filepath)
     
     if success:
-        print("\n🎉 Job completed successfully!")
+        print("\n[COMPLETE] Job completed successfully!")
     else:
-        print("\n💥 Job failed!")
+        print("\n[FAILED] Job failed!")
 
 if __name__ == "__main__":
     main()

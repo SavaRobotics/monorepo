@@ -29,7 +29,7 @@ def main():
     # Set default environment variables if not already set
     env_vars = {
         "CNC_SERVER_HOST": "0.0.0.0",
-        "CNC_SERVER_PORT": "8000",
+        "CNC_SERVER_PORT": "8001",
     }
     
     for var, default_value in env_vars.items():
