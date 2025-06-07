@@ -1,111 +1,62 @@
-# CNC Controller for Windows
+# Simple G-code Runner
 
-This controller monitors your database for new G-code files and automatically runs them in Mach3.
+A simple Python script that downloads G-code files from URLs and runs them in Mach3 CNC software.
 
 ## Features
 
-- Continuously monitors API/database for new G-code files
-- Downloads files to local folder
-- Automatically loads and runs in Mach3
-- Tracks processed files to avoid duplicates
-- Simple Windows-compatible dependencies
+- Downloads G-code files from any URL
+- Automatically loads and runs files in Mach3
+- Safety features: raises Z-axis, starts spindle, goes to zero
+- Image recognition for GUI automation
 
-## Setup
+## Installation
 
-1. **Install Python** (if not already installed)
-   - Download from python.org
-   - Make sure to check "Add Python to PATH"
+1. Install Python dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-2. **Install dependencies**
-   ```cmd
-   pip install -r requirements.txt
-   ```
-
-3. **Configure the controller**
-   
-   Edit `config.py` or `simple_controller.py` with your settings:
-   - `API_URL`: Your API endpoint that returns G-code download links
-   - `GCODE_FOLDER`: Where to save downloaded files (default: C:/CNC/GCode)
-   - `CHECK_INTERVAL`: How often to check for new files (default: 10 seconds)
-
-4. **API Response Format**
-   
-   Your API should return JSON in this format:
-   ```json
-   {
-     "url": "https://your-bucket.com/path/to/file.gcode",
-     "filename": "part123.gcode",
-     "file_id": "unique-id-123"
-   }
-   ```
+2. Make sure you have the required images in the `images/` folder:
+   - `load_gcode.png` - Load G-code button
+   - `open.png` - Open file button  
+   - `z_up.png` - Z-axis up button
+   - `spindle_start.png` - Spindle start button
+   - `go_to_zero.png` - Go to zero button
+   - `start.png` - Start program button
 
 ## Usage
 
-### Simple Version (Recommended to start)
-```cmd
-python simple_controller.py
+1. Open Mach3 CNC software
+2. Run the script with a G-code URL:
+
+```bash
+python simple_controller.py <gcode_url>
 ```
 
-### Full Version (More features)
-```cmd
-python main_enhanced.py
+### Example
+
+```bash
+python simple_controller.py https://example.com/path/to/your/file.gcode
 ```
 
 ## How It Works
 
-1. **Monitoring Loop**
-   - Checks your API every 10 seconds
-   - Downloads new G-code files
-   - Skips already processed files
+1. **Download**: Downloads the G-code file from the provided URL
+2. **Load**: Clicks the load G-code button in Mach3 and opens the file
+3. **Safety**: Raises the Z-axis for safety
+4. **Prepare**: Starts the spindle and moves to zero position  
+5. **Run**: Starts the G-code program
 
-2. **Mach3 Integration**
-   - Finds and activates Mach3 window
-   - Uses Ctrl+O to open file dialog
-   - Types the file path
-   - Clicks START button
+## Requirements
 
-3. **File Management**
-   - Downloads to C:/CNC/GCode/
-   - Keeps track of processed files
-   - Validates basic G-code format
+- Python 3.7+
+- Mach3 CNC software (must be open and running)
+- Windows OS (for pyautogui compatibility)
 
-## Troubleshooting
+## Safety Notes
 
-**Mach3 not found:**
-- Make sure Mach3 is running
-- Window title must contain "Mach3"
+⚠️ **Always ensure your CNC machine is properly set up and safe before running any G-code!**
 
-**START button not clicking:**
-- Take a screenshot of your START button
-- Save as `images/start.png` in the images folder
-- Or adjust coordinates in code
-
-**Can't download files:**
-- Check your API_URL is correct
-- Verify internet connection
-- Check API returns correct format
-
-## Environment Variables (Optional)
-
-Create a `.env` file:
-```
-API_BASE_URL=https://your-api.com
-CNC_API_KEY=your-api-key
-GCODE_FOLDER=C:/CNC/GCode
-CHECK_INTERVAL=10
-```
-
-## Example API Implementation
-
-If using Supabase:
-```python
-# In your API endpoint
-def get_next_gcode():
-    # Query your database for pending jobs
-    # Return first unprocessed file
-    return {
-        "url": storage_url,
-        "filename": "part123.gcode",
-        "file_id": "abc123"
-    }
-```
+- The script raises the Z-axis before starting
+- Make sure your workpiece and tooling are properly secured
+- Monitor the machine during operation 

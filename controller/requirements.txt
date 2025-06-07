@@ -1,10 +1,22 @@
-# CNC Controller Requirements
-# Simple dependencies that work well on Windows
+# Simple G-code Runner Dependencies
+pyautogui==0.9.54     # For Mach3 automation
+Pillow==10.4.0        # Required by PyAutoGUI for image recognition  
+requests==2.32.3      # For downloading G-code files
 
 # Core dependencies
-requests==2.31.0      # For API calls and file downloads
-pyautogui==0.9.54     # For Mach3 automation
-Pillow==10.2.0        # Required by PyAutoGUI for image recognition
+opencv-python==4.10.0.84
+
+# FastAPI server dependencies
+fastapi==0.115.6      # Web framework for local API server
+uvicorn==0.34.0        # ASGI server for running FastAPI
+pydantic==2.5.0       # Data validation (comes with FastAPI)
+python-multipart==0.0.19
 
 # Optional but recommended
 python-dotenv==1.0.0  # For loading environment variables from .env file
+
+# Database Dependencies
+postgrest==1.0.2
+
+# Supabase Official Client
+supabase==2.15.2
