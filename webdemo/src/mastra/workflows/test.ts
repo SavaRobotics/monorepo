@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { dockerUnfoldTool } from '../tools/unfolder/docker-unfold-tool';
 import { uploadDxfToSupabaseTool, uploadNestedDxfToSupabaseTool, updatePartDxfUrlTool, getAllDxfFilesUrlsTool } from '../tools/supabase';
 import { nestDxfTool } from '../tools/nesting/nester';
+import { cncControllerTool } from '../tools/cnc-controller';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -589,6 +590,7 @@ const uploadNestedDxfToSupabaseStep = createStep({
     nestedDxfSuccess: z.boolean(),
     nestedDxfUrl: z.string().optional(),
     nestedDxfUploadSuccess: z.boolean(),
+    nestedDxfUploadSuccess: z.boolean(),
     databaseAnalysis: z.string(),
   }),
   execute: async ({ inputData }) => {
@@ -1006,144 +1008,10 @@ const uploadGcodeToSupabase = createStep({
   },
 });
 
-// Analysis step for unfold results
-const analyzeUnfoldResults = createStep({
-  id: 'analyze-unfold-results',
-  description: 'Analyzes the unfold operation results',
-  inputSchema: z.object({
-    unfoldResult: z.object({
-      success: z.boolean(),
-      outputFiles: z.array(z.object({
-        filename: z.string(),
-        content: z.string(),
-        mimeType: z.string(),
-      })),
-      logs: z.string(),
-      processingTime: z.number(),
-    }),
-    processingNotes: z.string(),
-    cadFileUrl: z.string().url(),
-  }),
-  outputSchema: z.object({
-    unfoldResult: z.object({
-      success: z.boolean(),
-      outputFiles: z.array(z.object({
-        filename: z.string(),
-        content: z.string(),
-        mimeType: z.string(),
-      })),
-      logs: z.string(),
-      processingTime: z.number(),
-    }),
-    processingNotes: z.string(),
-    cadFileUrl: z.string().url(),
-    unfoldAnalysis: z.string(),
-  }),
-  execute: async ({ inputData }) => {
-    console.log('🤔 Agent analyzing unfold results...');
-    
-    const { unfoldResult } = inputData;
-    
-    const analysis = await analysisAgent.generate([
-      {
-        role: 'user',
-        content: `Analyze these CAD unfold results:
-        - Success: ${unfoldResult.success}
-        - Processing Time: ${(unfoldResult.processingTime / 1000).toFixed(2)} seconds
-        - Output Files: ${unfoldResult.outputFiles.length} files
-        - File Details: ${unfoldResult.outputFiles.map(f => `${f.filename} (${Math.round(f.content.length / 1024)}KB)`).join(', ')}
-        - Logs: ${unfoldResult.logs}
-        
-        Assess the quality and success of this unfold operation. What does this tell us about the CAD file and process?`
-      }
-    ]);
-
-    console.log('📝 Unfold Analysis:', analysis.text);
-
-    return {
-      unfoldResult: inputData.unfoldResult,
-      processingNotes: inputData.processingNotes,
-      cadFileUrl: inputData.cadFileUrl,
-      unfoldAnalysis: analysis.text,
-    };
-  },
-});
-
-// Analysis step for database operations
-const analyzeDatabaseOperations = createStep({
-  id: 'analyze-database-operations',
-  description: 'Analyzes database storage and retrieval operations',
-  inputSchema: z.object({
-    unfoldResult: z.object({
-      success: z.boolean(),
-      outputFiles: z.array(z.object({
-        filename: z.string(),
-        content: z.string(),
-        mimeType: z.string(),
-      })),
-      logs: z.string(),
-      processingTime: z.number(),
-    }),
-    processingNotes: z.string(),
-    supabaseUrl: z.string().optional(),
-    supabaseUploadSuccess: z.boolean(),
-    partsTableUpdateSuccess: z.boolean(),
-    updatedPartId: z.number().optional(),
-    dxfFilesUrls: z.array(z.string()),
-    dxfFilesCount: z.number(),
-    unfoldAnalysis: z.string(),
-  }),
-  outputSchema: z.object({
-    unfoldResult: z.object({
-      success: z.boolean(),
-      outputFiles: z.array(z.object({
-        filename: z.string(),
-        content: z.string(),
-        mimeType: z.string(),
-      })),
-      logs: z.string(),
-      processingTime: z.number(),
-    }),
-    processingNotes: z.string(),
-    supabaseUrl: z.string().optional(),
-    supabaseUploadSuccess: z.boolean(),
-    partsTableUpdateSuccess: z.boolean(),
-    updatedPartId: z.number().optional(),
-    dxfFilesUrls: z.array(z.string()),
-    dxfFilesCount: z.number(),
-    databaseAnalysis: z.string(),
-  }),
-  execute: async ({ inputData }) => {
-    console.log('🤔 Agent analyzing database operations...');
-    
-    const analysis = await analysisAgent.generate([
-      {
-        role: 'user',
-        content: `Analyze these database operations:
-        - Supabase Upload Success: ${inputData.supabaseUploadSuccess}
-        - Supabase URL: ${inputData.supabaseUrl || 'none'}
-        - Parts Table Update Success: ${inputData.partsTableUpdateSuccess}
-        - Updated Part ID: ${inputData.updatedPartId || 'none'}
-        - Total DXF Files in Database: ${inputData.dxfFilesCount}
-        - DXF Files URLs: ${inputData.dxfFilesUrls.length} files
-        
-        Assess the database operations. Are we building a good manufacturing database? Any concerns?`
-      }
-    ]);
-
-    console.log('📝 Database Analysis:', analysis.text);
-
-    return {
-      ...inputData,
-      databaseAnalysis: analysis.text,
-    };
-  },
-});
-
-// Analysis step for nesting operations
-const analyzeNestingResults = createStep({
-  id: 'analyze-nesting-results',
-  description: 'Analyzes the nesting operation results',
+// Trigger CNC Controller step
+const triggerCncController = createStep({
+  id: 'trigger-cnc-controller',
+  description: 'Triggers the CNC controller on Windows machine to run the G-code',
   inputSchema: z.object({
     unfoldResult: z.object({
       success: z.boolean(),
@@ -1166,7 +1034,12 @@ const analyzeNestingResults = createStep({
     nestedDxfSuccess: z.boolean(),
     nestedDxfUrl: z.string().optional(),
     nestedDxfUploadSuccess: z.boolean(),
-    databaseAnalysis: z.string(),
+    gcodeContent: z.string().optional(),
+    gcodeFilename: z.string().optional(),
+    gcodeGenerationSuccess: z.boolean(),
+    gcodeUrl: z.string().optional(),
+    gcodeUploadSuccess: z.boolean(),
+    nestingAnalysis: z.string(),
   }),
   outputSchema: z.object({
     unfoldResult: z.object({
@@ -1190,30 +1063,118 @@ const analyzeNestingResults = createStep({
     nestedDxfSuccess: z.boolean(),
     nestedDxfUrl: z.string().optional(),
     nestedDxfUploadSuccess: z.boolean(),
+    gcodeContent: z.string().optional(),
+    gcodeFilename: z.string().optional(),
+    gcodeGenerationSuccess: z.boolean(),
+    gcodeUrl: z.string().optional(),
+    gcodeUploadSuccess: z.boolean(),
+    cncTriggerSuccess: z.boolean(),
+    cncJobId: z.string().optional(),
+    cncControllerUrl: z.string().optional(),
+    cncMessage: z.string().optional(),
     nestingAnalysis: z.string(),
   }),
   execute: async ({ inputData }) => {
-    console.log('🤔 Agent analyzing nesting results...');
-    
-    const analysis = await analysisAgent.generate([
-      {
-        role: 'user',
-        content: `Analyze these nesting operation results:
-        - Nesting Success: ${inputData.nestedDxfSuccess}
-        - Input Files Count: ${inputData.dxfFilesCount}
-        - Nested DXF Size: ${inputData.nestedDxfContent ? Math.round(inputData.nestedDxfContent.length / 1024) + 'KB' : 'none'}
-        - Nested DXF Upload Success: ${inputData.nestedDxfUploadSuccess}
-        - Nested DXF URL: ${inputData.nestedDxfUrl || 'none'}
-        
-        Assess the nesting efficiency and optimization. How well did the algorithm pack the parts?`
-      }
-    ]);
+    if (!inputData) {
+      throw new Error('Input data not found');
+    }
 
-    console.log('📝 Nesting Analysis:', analysis.text);
+    const { 
+      unfoldResult, 
+      processingNotes, 
+      supabaseUrl, 
+      supabaseUploadSuccess, 
+      partsTableUpdateSuccess, 
+      updatedPartId, 
+      dxfFilesUrls, 
+      dxfFilesCount,
+      nestedDxfContent,
+      nestedDxfSuccess,
+      nestedDxfUrl,
+      nestedDxfUploadSuccess,
+      gcodeContent,
+      gcodeFilename,
+      gcodeGenerationSuccess,
+      gcodeUrl,
+      gcodeUploadSuccess,
+      nestingAnalysis
+    } = inputData;
+    
+    let cncTriggerSuccess = false;
+    let cncJobId: string | undefined;
+    let cncControllerUrl: string | undefined;
+    let cncMessage: string | undefined;
+
+    // Only trigger CNC if we have a G-code URL
+    if (gcodeUploadSuccess && gcodeUrl) {
+      try {
+        // Get Windows computer IP from environment variables
+        const windowsComputerIp = process.env.WINDOWS_CNC_IP || '192.168.1.100';
+        const cncPort = parseInt(process.env.CNC_CONTROLLER_PORT || '8000');
+        
+        console.log('🔧 Triggering CNC controller on Windows machine...');
+        console.log(`🖥️ Windows IP: ${windowsComputerIp}:${cncPort}`);
+        console.log(`📐 G-code URL: ${gcodeUrl}`);
+        
+        // Execute the CNC controller tool
+        const result = await cncControllerTool.execute({
+          context: {
+            gcodeUrl: gcodeUrl,
+            windowsComputerIp: windowsComputerIp,
+            port: cncPort,
+            timeout: 30000, // 30 second timeout
+          },
+          runtimeContext: new RuntimeContext(),
+        });
+
+        cncTriggerSuccess = result.success;
+        cncJobId = result.jobId;
+        cncControllerUrl = result.controllerUrl;
+        cncMessage = result.message;
+
+        if (result.success) {
+          console.log(`✅ CNC controller triggered successfully`);
+          console.log(`🆔 Job ID: ${result.jobId}`);
+          console.log(`📡 Controller URL: ${result.controllerUrl}`);
+        } else {
+          console.error(`❌ CNC controller trigger failed: ${result.error}`);
+        }
+        
+      } catch (error) {
+        console.error(`❌ Error triggering CNC controller: ${error}`);
+        cncMessage = `Error: ${error}`;
+      }
+    } else {
+      console.log('⚠️ No G-code URL available for CNC controller');
+      cncMessage = 'No G-code URL available';
+    }
 
     return {
-      ...inputData,
-      nestingAnalysis: analysis.text,
+      unfoldResult,
+      processingNotes: processingNotes + 
+        (cncTriggerSuccess 
+          ? `\n\n🔧 CNC Controller Results:\n• Success: ✅\n• Job ID: ${cncJobId}\n• Controller: ${cncControllerUrl}`
+          : `\n\n🔧 CNC Controller Results:\n• Success: ❌\n• Message: ${cncMessage}`),
+      supabaseUrl,
+      supabaseUploadSuccess,
+      partsTableUpdateSuccess,
+      updatedPartId,
+      dxfFilesUrls,
+      dxfFilesCount,
+      nestedDxfContent,
+      nestedDxfSuccess,
+      nestedDxfUrl,
+      nestedDxfUploadSuccess,
+      gcodeContent,
+      gcodeFilename,
+      gcodeGenerationSuccess,
+      gcodeUrl,
+      gcodeUploadSuccess,
+      cncTriggerSuccess,
+      cncJobId,
+      cncControllerUrl,
+      cncMessage,
+      nestingAnalysis,
     };
   },
 });
@@ -1249,6 +1210,10 @@ const provideFinalAnalysis = createStep({
     gcodeGenerationSuccess: z.boolean(),
     gcodeUrl: z.string().optional(),
     gcodeUploadSuccess: z.boolean(),
+    cncTriggerSuccess: z.boolean(),
+    cncJobId: z.string().optional(),
+    cncControllerUrl: z.string().optional(),
+    cncMessage: z.string().optional(),
     nestingAnalysis: z.string(),
   }),
   outputSchema: z.object({
@@ -1278,6 +1243,10 @@ const provideFinalAnalysis = createStep({
     gcodeGenerationSuccess: z.boolean(),
     gcodeUrl: z.string().optional(),
     gcodeUploadSuccess: z.boolean(),
+    cncTriggerSuccess: z.boolean(),
+    cncJobId: z.string().optional(),
+    cncControllerUrl: z.string().optional(),
+    cncMessage: z.string().optional(),
     finalAnalysis: z.string(),
     recommendations: z.string(),
     nestingAnalysis: z.string(),
@@ -1297,17 +1266,20 @@ const provideFinalAnalysis = createStep({
         - Nesting Success: ${inputData.nestedDxfSuccess}
         - G-code Generation: ${inputData.gcodeGenerationSuccess}
         - G-code Upload: ${inputData.gcodeUploadSuccess}
+        - CNC Controller Trigger: ${inputData.cncTriggerSuccess}
         
         DELIVERABLES:
         - DXF File: ${inputData.supabaseUrl || 'failed'}
         - Nested DXF: ${inputData.nestedDxfUrl || 'failed'}
         - G-code File: ${inputData.gcodeUrl || 'failed'}
+        - CNC Job ID: ${inputData.cncJobId || 'none'}
         
         Provide:
         1. Overall workflow assessment (success/failure and quality)
         2. Manufacturing readiness evaluation
-        3. Key recommendations for improvement
-        4. Next steps for production`
+        3. CNC execution status
+        4. Key recommendations for improvement
+        5. Next steps for production`
       }
     ]);
 
@@ -1317,11 +1289,12 @@ const provideFinalAnalysis = createStep({
     const recommendations = await analysisAgent.generate([
       {
         role: 'user',
-        content: `Based on the workflow results, provide 3-5 specific, actionable recommendations for:
+        content: `Based on the workflow results including CNC trigger status, provide 3-5 specific, actionable recommendations for:
         1. Process optimization
         2. Quality improvements
         3. Cost reduction
         4. Time savings
+        5. CNC automation improvements
         
         Format as a bulleted list.`
       }
@@ -1375,6 +1348,10 @@ const cadUnfoldTestWorkflow = createWorkflow({
     gcodeGenerationSuccess: z.boolean(),
     gcodeUrl: z.string().optional(),
     gcodeUploadSuccess: z.boolean(),
+    cncTriggerSuccess: z.boolean(),
+    cncJobId: z.string().optional(),
+    cncControllerUrl: z.string().optional(),
+    cncMessage: z.string().optional(),
     finalAnalysis: z.string(),
     recommendations: z.string(),
   }),
@@ -1391,6 +1368,7 @@ const cadUnfoldTestWorkflow = createWorkflow({
   .then(analyzeNestingResults)    // 🤔 Agent analyzes nesting
   .then(generateGcodeFromNestedDxf)
   .then(uploadGcodeToSupabase)
+  .then(triggerCncController)
   .then(provideFinalAnalysis);    // 🤔 Agent provides final analysis
 
 cadUnfoldTestWorkflow.commit();

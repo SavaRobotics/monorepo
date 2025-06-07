@@ -106,3 +106,6 @@ export { getDxfUrlsTool } from './supabase';
 
 // Export nesting tools
 export { nestDxfTool } from './nesting/nester';
+
+// Export CNC controller tool
+export { cncControllerTool } from './cnc-controller';
