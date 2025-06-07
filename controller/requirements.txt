@@ -1,0 +1,10 @@
+# CNC Controller Requirements
+# Simple dependencies that work well on Windows
+
+# Core dependencies
+requests==2.31.0      # For API calls and file downloads
+pyautogui==0.9.54     # For Mach3 automation
+Pillow==10.2.0        # Required by PyAutoGUI for image recognition
+
+# Optional but recommended
+python-dotenv==1.0.0  # For loading environment variables from .env file
